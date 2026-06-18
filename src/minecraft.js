@@ -95,6 +95,22 @@ async function allStatus() {
   return out;
 }
 
+async function statusOf(id) {
+  const s = getServer(id);
+  if (!s) throw new Error('알 수 없는 서버: ' + id);
+  return serverStatus(s);
+}
+
+// 일부 작업(월드 교체/복원/소프트웨어 교체)은 서버가 꺼져 있어야 안전
+async function requireStopped(id) {
+  const st = await statusOf(id);
+  if (st.state === 'running' || st.state === 'starting') {
+    const e = new Error('이 작업은 서버가 꺼져 있을 때만 가능합니다. 먼저 서버를 정지하세요.');
+    e.status = 409;
+    throw e;
+  }
+}
+
 async function startServer(id) {
   const s = getServer(id);
   if (!s) throw new Error('알 수 없는 서버: ' + id);
@@ -177,6 +193,8 @@ async function stopAll() {
 module.exports = {
   allStatus,
   serverStatus,
+  statusOf,
+  requireStopped,
   startServer,
   stopServer,
   restartServer,

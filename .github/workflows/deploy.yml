@@ -17,24 +17,28 @@ jobs:
         env:
           PANEL_PASSWORD: ${{ secrets.PANEL_PASSWORD }}
           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+          PANEL_VIEWER_PASSWORD: ${{ secrets.PANEL_VIEWER_PASSWORD }}
+          AUTO_BACKUP_HOURS: ${{ vars.AUTO_BACKUP_HOURS }}
         with:
           host: ssh.gsmsv.site
           port: 24160
           username: ubuntu
           password: ${{ secrets.SERVER_PASSWORD }}
-          envs: PANEL_PASSWORD,SESSION_SECRET
+          envs: PANEL_PASSWORD,SESSION_SECRET,PANEL_VIEWER_PASSWORD,AUTO_BACKUP_HOURS
           command_timeout: 20m
           script: |
             set -e
 
-            echo "[1/5] 필수 패키지 확인 (git, curl, node)"
+            echo "[1/5] 필수 패키지 확인 (git, curl, zip, node)"
             NEED_APT=0
             command -v git  >/dev/null || NEED_APT=1
             command -v curl >/dev/null || NEED_APT=1
+            command -v zip  >/dev/null || NEED_APT=1
             command -v node >/dev/null || NEED_APT=1
             if [ "$NEED_APT" = 1 ]; then sudo apt-get update -y; fi
             command -v git  >/dev/null || sudo apt-get install -y git
             command -v curl >/dev/null || sudo apt-get install -y curl
+            command -v zip  >/dev/null || sudo apt-get install -y zip
             if ! command -v node >/dev/null; then
               echo "Node.js 22 설치 중..."
               curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
@@ -61,8 +65,8 @@ jobs:
 
             echo "[4/5] 환경설정(.env) 작성"
             umask 077
-            printf 'PANEL_HOST=127.0.0.1\nPANEL_PORT=3000\nPANEL_PASSWORD=%s\nSESSION_SECRET=%s\nTMUX_TMPDIR=/tmp\n' \
-              "$PANEL_PASSWORD" "$SESSION_SECRET" > ~/MITS/.env
+            printf 'PANEL_HOST=127.0.0.1\nPANEL_PORT=3000\nPANEL_PASSWORD=%s\nSESSION_SECRET=%s\nTMUX_TMPDIR=/tmp\nPANEL_VIEWER_PASSWORD=%s\nAUTO_BACKUP_HOURS=%s\n' \
+              "$PANEL_PASSWORD" "$SESSION_SECRET" "$PANEL_VIEWER_PASSWORD" "${AUTO_BACKUP_HOURS:-0}" > ~/MITS/.env
 
             echo "[5/5] systemd 서비스 등록 및 재시작"
             sudo cp ~/MITS/scripts/mits.service /etc/systemd/system/mits.service

@@ -37,6 +37,7 @@ const config = {
   host: process.env.PANEL_HOST || '127.0.0.1',
   port: parseInt(process.env.PANEL_PORT || '3000', 10),
   password: process.env.PANEL_PASSWORD || 'admin',
+  viewerPassword: process.env.PANEL_VIEWER_PASSWORD || '',
   sessionSecret: process.env.SESSION_SECRET || 'mits-dev-secret-change-me',
 
   sshHost: process.env.SSH_HOST || 'ssh.gsmsv.site',
@@ -45,6 +46,11 @@ const config = {
   consoleLines: parseInt(process.env.CONSOLE_LINES || '250', 10),
   startScript: process.env.START_SCRIPT || inHome('start.sh'),
   stopScript: process.env.STOP_SCRIPT || inHome('stop.sh'),
+
+  // 백업 / 자동백업
+  backupDir: process.env.BACKUP_DIR || inHome('mits-backups'),
+  backupKeep: parseInt(process.env.BACKUP_KEEP || '10', 10),
+  autoBackupHours: parseFloat(process.env.AUTO_BACKUP_HOURS || '0'),
 };
 
 function getServer(id) {
