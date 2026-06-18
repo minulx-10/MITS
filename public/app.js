@@ -223,9 +223,46 @@ async function viewPlayers() {
       <input id="pIp" placeholder="IP (예: 1.2.3.4)" style="max-width:150px" ${admin() ? '' : 'disabled'} />
       <button class="stop small" data-pact="ban-ip" data-ip="1" ${admin() ? '' : 'disabled'}>IP 차단</button>
     </div></section>
-    <div id="plists"></div>`;
+    <div id="plists"></div>
+    <section class="panel">
+      <div class="panel-head"><div class="panel-title">🎮 플레이어 상세 정보 (인벤토리·체력·좌표·허기·엔더상자·착용·스폰)</div>
+        <button class="ghost small" id="pdRefresh">새로고침</button></div>
+      <div class="pd-wrap"><div class="pd-list" id="pdList">불러오는 중…</div>
+        <div class="pd-detail" id="pdDetail"><p class="muted">왼쪽에서 플레이어를 선택하면 마크 내부 정보를 모두 보여줍니다.</p></div></div>
+    </section>`;
   $('#view').addEventListener('click', onPlayerBtn);
+  $('#pdRefresh').onclick = loadPlayerDataList;
   await loadPlayers();
+  await loadPlayerDataList();
+}
+async function loadPlayerDataList() {
+  let d; try { d = await api(`${SP()}/playerdata`); } catch (e) { $('#pdList').textContent = e.message; return; }
+  if (!d.items.length) { $('#pdList').innerHTML = '<p class="muted" style="padding:10px">접속 기록(playerdata)이 없습니다.</p>'; return; }
+  $('#pdList').innerHTML = d.items.map((p) => `<button class="pd-item" data-uuid="${esc(p.uuid)}"><b>${esc(p.name)}</b><span class="muted">${esc(p.uuid.slice(0, 13))}…</span></button>`).join('');
+  $('#pdList').querySelectorAll('button[data-uuid]').forEach((b) => b.onclick = () => {
+    $('#pdList').querySelectorAll('.pd-item').forEach((x) => x.classList.remove('active'));
+    b.classList.add('active'); showPlayerDetail(b.dataset.uuid);
+  });
+}
+async function showPlayerDetail(uuid) {
+  $('#pdDetail').innerHTML = '<p class="muted">불러오는 중…</p>';
+  let d; try { d = await api(`${SP()}/playerdata/${uuid}`); } catch (e) { $('#pdDetail').innerHTML = `<p class="muted">${esc(e.message)}</p>`; return; }
+  const stat = (k, v) => `<div class="pd-stat"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+  const items = (arr) => arr.length ? `<div class="pd-items">${arr.map((i) => `<span class="pd-slot" title="슬롯 ${i.slot}">${esc(i.id)}${i.count > 1 ? ` <b>×${i.count}</b>` : ''}</span>`).join('')}</div>` : '<p class="muted">비어 있음</p>';
+  const pos = d.pos ? `${d.pos[0]}, ${d.pos[1]}, ${d.pos[2]}` : '—';
+  const spawn = d.spawn ? `${d.spawn.x}, ${d.spawn.y}, ${d.spawn.z}` : '설정 안 됨';
+  const armor = (d.armor || []).map((a) => `${a.label}=${esc(a.id)}`).join(' · ') || '없음';
+  $('#pdDetail').innerHTML = `
+    <div class="pd-headline">${esc(d.name)} <span class="muted">${esc(d.uuid)}</span></div>
+    <div class="pd-stats">
+      ${stat('좌표 (XYZ)', pos)}${stat('차원', esc(d.dimension || '—'))}
+      ${stat('체력', d.health != null ? `${d.health} / 20 ♥` : '—')}${stat('허기', d.food != null ? `${d.food} / 20 🍗 (포화 ${d.saturation ?? 0})` : '—')}
+      ${stat('경험치', d.xpLevel != null ? `Lv ${d.xpLevel} (총 ${d.xpTotal ?? '?'})` : '—')}${stat('게임모드', esc(d.gameTypeName))}
+      ${stat('스폰 포인트', spawn)}${stat('착용 장비', esc(armor))}
+      ${d.offhand ? stat('오프핸드', esc(d.offhand.id) + (d.offhand.count > 1 ? ` ×${d.offhand.count}` : '')) : ''}
+    </div>
+    <div class="pd-section"><h4>🎒 인벤토리 (${d.inventory.length}칸 사용)</h4>${items(d.inventory)}</div>
+    <div class="pd-section"><h4>📦 엔더 상자 (${d.ender.length}칸 사용)</h4>${items(d.ender)}</div>`;
 }
 async function onPlayerBtn(e) {
   const b = e.target.closest('button[data-pact]'); if (!b) return;
@@ -280,19 +317,31 @@ async function viewSoftware() {
 
 /* ===== 탭: 플러그인 ===== */
 async function viewPlugins() {
-  $('#view').innerHTML = `<section class="info"><h3>플러그인 — ${esc(curName())}</h3>
-    <div class="plugin-tools">
-      <label class="upload-btn ${admin() ? '' : 'disabled'}">+ .jar 업로드<input type="file" id="plUp" accept=".jar" hidden ${admin() ? '' : 'disabled'}></label>
-      <input id="mrQ" placeholder="Modrinth에서 플러그인 검색 (예: essentials)" />
-      <button class="start small" id="mrGo">검색</button>
-    </div>
-    <div id="mrResults"></div>
-    <div id="plList" class="muted">불러오는 중…</div></section>`;
+  $('#view').innerHTML = `
+    <section class="info"><h3>설치된 플러그인 — ${esc(curName())}</h3>
+      <div class="plugin-tools">
+        <label class="upload-btn small ${admin() ? '' : 'disabled'}">+ .jar 직접 업로드<input type="file" id="plUp" accept=".jar" hidden ${admin() ? '' : 'disabled'}></label>
+        <button class="ghost small" id="plRefresh">새로고침</button>
+      </div>
+      <div id="plList" class="muted" style="margin-top:12px">불러오는 중…</div></section>
+    <section class="info"><h3>🔎 온라인 검색 · 즉시 설치 (Modrinth)</h3>
+      <p class="muted">검색 후 <b>[설치]</b>를 누르면 서버 plugins 폴더로 바로 내려받습니다. (서버 재시작 후 적용)</p>
+      <div class="plugin-tools">
+        <input id="mrQ" placeholder="플러그인 이름 검색 (예: EssentialsX, LuckPerms, WorldGuard)" />
+        <button class="start small" id="mrGo">검색</button>
+      </div>
+      <div class="chips" id="mrChips"></div>
+      <div id="mrResults" class="muted" style="margin-top:6px">인기 플러그인 불러오는 중…</div></section>`;
   $('#plUp').onchange = (e) => uploadFile(`${SP()}/plugins/upload`, e.target.files[0], loadPlugins);
+  $('#plRefresh').onclick = loadPlugins;
   $('#mrGo').onclick = searchModrinth;
   $('#mrQ').addEventListener('keydown', (e) => { if (e.key === 'Enter') searchModrinth(); });
+  const chips = ['EssentialsX', 'LuckPerms', 'WorldGuard', 'Vault', 'ViaVersion', 'CoreProtect', 'Chunky', 'Dynmap'];
+  $('#mrChips').innerHTML = chips.map((c) => `<button class="chip" data-chip="${c}">${c}</button>`).join('');
+  $('#mrChips').querySelectorAll('button[data-chip]').forEach((b) => b.onclick = () => { $('#mrQ').value = b.dataset.chip; searchModrinth(); });
   $('#view').addEventListener('click', onPluginBtn);
   await loadPlugins();
+  await searchModrinth();
 }
 async function loadPlugins() {
   let d; try { d = await api(`${SP()}/plugins`); } catch (e) { $('#plList').textContent = e.message; return; }
@@ -313,72 +362,134 @@ async function onPluginBtn(e) {
   catch (err) { toast(err.message, true); }
 }
 async function searchModrinth() {
-  const q = $('#mrQ').value.trim(); if (!q) return;
-  $('#mrResults').innerHTML = '<p class="muted">검색 중…</p>';
+  const q = $('#mrQ').value.trim();
+  $('#mrResults').innerHTML = '<p class="muted">불러오는 중…</p>';
   try {
     const d = await api('/api/modrinth/search?q=' + encodeURIComponent(q));
-    $('#mrResults').innerHTML = d.items.length ? `<div class="mr-grid">${d.items.map((m) => `<div class="mr-card">
-      <div class="mr-title">${esc(m.title)}</div><div class="mr-desc">${esc((m.desc || '').slice(0, 80))}</div>
+    const head = d.popular ? '<p class="muted">⭐ 인기 플러그인 (다운로드순)</p>' : '';
+    $('#mrResults').innerHTML = head + (d.items.length ? `<div class="mr-grid">${d.items.map((m) => `<div class="mr-card">
+      <div class="mr-top">${m.icon ? `<img class="mr-ico" src="${esc(m.icon)}" alt="" loading="lazy">` : '<span class="mr-ico ph">🧩</span>'}<div class="mr-title">${esc(m.title)}</div></div>
+      <div class="mr-desc">${esc((m.desc || '').slice(0, 90))}</div>
       <div class="mr-foot"><span class="muted">⬇ ${m.downloads.toLocaleString()}</span>
-      ${admin() ? `<button class="start xs" data-mri="${esc(m.id)}">설치</button>` : ''}</div></div>`).join('')}</div>` : '<p class="muted">결과 없음</p>';
+      ${admin() ? `<button class="start xs" data-mri="${esc(m.id)}">설치</button>` : ''}</div></div>`).join('')}</div>` : '<p class="muted">결과 없음</p>');
     $('#mrResults').querySelectorAll('button[data-mri]').forEach((btn) => btn.onclick = async () => {
-      try { toast('설치 중…'); const r = await post(`${SP()}/plugins/install`, { projectId: btn.dataset.mri }); toast(r.message); loadPlugins(); }
-      catch (e) { toast(e.message, true); }
+      btn.disabled = true; btn.textContent = '설치 중…';
+      try { const r = await post(`${SP()}/plugins/install`, { projectId: btn.dataset.mri }); toast(r.message); loadPlugins(); btn.textContent = '설치됨 ✓'; }
+      catch (e) { toast(e.message, true); btn.disabled = false; btn.textContent = '설치'; }
     });
   } catch (e) { $('#mrResults').innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
 }
 
 /* ===== 탭: 파일 매니저 ===== */
-let filePath = '';
+const fmState = { path: '', items: [], sortKey: 'name', sortDir: 1, filter: '' };
 async function viewFiles() {
-  filePath = '';
+  fmState.path = ''; fmState.filter = '';
   $('#view').innerHTML = `<section class="panel">
-    <div class="panel-head"><div class="panel-title" id="fmCrumb">/</div>
+    <div class="panel-head">
+      <div class="fm-crumb" id="fmCrumb"></div>
       <div class="fm-tools">
-        <button class="ghost small" id="fmUp">↑ 상위</button>
-        <button class="ghost small" id="fmMk" ${admin() ? '' : 'disabled'}>새 폴더</button>
+        <input id="fmFilter" class="fm-filter" placeholder="이 폴더에서 찾기…">
+        <button class="ghost small" id="fmMk" ${admin() ? '' : 'disabled'}>+폴더</button>
+        <button class="ghost small" id="fmNew" ${admin() ? '' : 'disabled'}>+파일</button>
         <label class="upload-btn small ${admin() ? '' : 'disabled'}">업로드<input type="file" id="fmUpload" hidden ${admin() ? '' : 'disabled'}></label>
-        <button class="ghost small" id="fmRefresh">새로고침</button></div></div>
-    <div id="fmBody" class="fm-body">불러오는 중…</div></section>`;
-  $('#fmUp').onclick = () => { const p = filePath.split('/').slice(0, -1).join('/'); loadFiles(p); };
-  $('#fmRefresh').onclick = () => loadFiles(filePath);
-  $('#fmMk').onclick = async () => { const name = await modal({ title: '새 폴더', input: true, placeholder: '폴더 이름', ok: '생성' }); if (name) { try { await post(`${SP()}/files/mkdir`, { path: filePath, name }); loadFiles(filePath); } catch (e) { toast(e.message, true); } } };
-  $('#fmUpload').onchange = (e) => uploadFile(`${SP()}/files/upload?`, e.target.files[0], () => loadFiles(filePath), { path: filePath });
+        <button class="ghost small" id="fmRefresh">새로고침</button>
+      </div></div>
+    <div id="fmBody" class="fm-body">불러오는 중…</div>
+    <div class="fm-drop" id="fmDrop">📥 여기에 파일을 놓으면 업로드됩니다</div></section>`;
+  $('#fmRefresh').onclick = () => loadFiles(fmState.path);
+  $('#fmMk').onclick = async () => { const name = await modal({ title: '새 폴더', input: true, placeholder: '폴더 이름', ok: '생성' }); if (name) { try { await post(`${SP()}/files/mkdir`, { path: fmState.path, name }); loadFiles(fmState.path); } catch (e) { toast(e.message, true); } } };
+  $('#fmNew').onclick = async () => { const name = await modal({ title: '새 파일', input: true, placeholder: '예: config.yml', ok: '생성' }); if (name) { try { await post(`${SP()}/files/newfile`, { path: fmState.path, name }); loadFiles(fmState.path); } catch (e) { toast(e.message, true); } } };
+  $('#fmUpload').onchange = (e) => uploadFile(`${SP()}/files/upload?`, e.target.files[0], () => loadFiles(fmState.path), { path: fmState.path });
+  $('#fmFilter').addEventListener('input', (e) => { fmState.filter = e.target.value.toLowerCase(); renderFiles(); });
+  setupDrop();
   await loadFiles('');
+}
+function setupDrop() {
+  const body = $('#fmBody'); const drop = $('#fmDrop'); if (!body || !drop) return;
+  const show = (on) => drop.classList.toggle('show', on);
+  ['dragenter', 'dragover'].forEach((ev) => body.addEventListener(ev, (e) => { e.preventDefault(); if (admin()) show(true); }));
+  body.addEventListener('dragleave', (e) => { if (e.relatedTarget && body.contains(e.relatedTarget)) return; show(false); });
+  body.addEventListener('drop', (e) => {
+    e.preventDefault(); show(false);
+    if (!admin()) return;
+    const f = e.dataTransfer.files[0];
+    if (f) uploadFile(`${SP()}/files/upload?`, f, () => loadFiles(fmState.path), { path: fmState.path });
+  });
 }
 async function loadFiles(p) {
   let d; try { d = await api(`${SP()}/files?path=` + encodeURIComponent(p || '')); } catch (e) { toast(e.message, true); return; }
-  filePath = d.path;
-  $('#fmCrumb').textContent = '/' + d.path;
-  const rows = d.items.map((it) => {
-    const icon = it.type === 'dir' ? '📁' : '📄';
-    const nameCell = it.type === 'dir'
-      ? `<a class="fm-link" data-dir="${esc((d.path ? d.path + '/' : '') + it.name)}">${icon} ${esc(it.name)}</a>`
-      : `<span>${icon} ${esc(it.name)}</span>`;
+  fmState.path = d.path; fmState.items = d.items;
+  renderCrumb(); renderFiles();
+}
+function renderCrumb() {
+  const parts = fmState.path ? fmState.path.split('/') : [];
+  let acc = '';
+  const crumbs = [`<a class="fm-cr" data-cp="">🏠 루트</a>`];
+  parts.forEach((seg) => { acc = acc ? acc + '/' + seg : seg; crumbs.push(`<span class="fm-sep">/</span><a class="fm-cr" data-cp="${esc(acc)}">${esc(seg)}</a>`); });
+  const el = $('#fmCrumb'); el.innerHTML = crumbs.join('');
+  el.querySelectorAll('a[data-cp]').forEach((a) => a.onclick = () => loadFiles(a.dataset.cp));
+}
+function fileIcon(name) {
+  const e = name.split('.').pop().toLowerCase();
+  if (['yml', 'yaml', 'properties', 'conf', 'cfg', 'toml', 'ini'].includes(e)) return '⚙️';
+  if (e === 'json') return '🗂️';
+  if (['jar', 'zip', 'gz', 'tar', 'tgz'].includes(e)) return '📦';
+  if (['log', 'txt', 'md'].includes(e)) return '📄';
+  if (e === 'sh') return '📜';
+  if (['png', 'jpg', 'jpeg', 'gif'].includes(e)) return '🖼️';
+  return '📄';
+}
+function renderFiles() {
+  const ic = (k) => fmState.sortKey === k ? (fmState.sortDir > 0 ? ' ▲' : ' ▼') : '';
+  let items = fmState.items.slice();
+  if (fmState.filter) items = items.filter((i) => i.name.toLowerCase().includes(fmState.filter));
+  items.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
+    const k = fmState.sortKey;
+    const r = k === 'name' ? a.name.localeCompare(b.name) : ((a[k] || 0) - (b[k] || 0));
+    return r * fmState.sortDir;
+  });
+  const rows = items.map((it) => {
+    const full = (fmState.path ? fmState.path + '/' : '') + it.name;
+    const icon = it.type === 'dir' ? '📁' : fileIcon(it.name);
+    const nameCell = it.type === 'dir' ? `<a class="fm-link" data-dir="${esc(full)}">${icon} ${esc(it.name)}</a>` : `<span>${icon} ${esc(it.name)}</span>`;
     const acts = [];
-    if (it.type === 'file' && it.editable && admin()) acts.push(`<button class="ghost xs" data-edit="${esc((d.path ? d.path + '/' : '') + it.name)}">편집</button>`);
-    if (it.type === 'file') acts.push(`<a class="ghost xs" href="${SP()}/files/download?path=${encodeURIComponent((d.path ? d.path + '/' : '') + it.name)}">받기</a>`);
-    if (admin()) acts.push(`<button class="link-del" data-del="${esc((d.path ? d.path + '/' : '') + it.name)}">삭제</button>`);
+    if (it.type === 'file' && it.editable && admin()) acts.push(`<button class="ghost xs" data-edit="${esc(full)}">편집</button>`);
+    if (it.type === 'file') acts.push(`<a class="ghost xs" href="${SP()}/files/download?path=${encodeURIComponent(full)}">받기</a>`);
+    if (admin()) acts.push(`<button class="ghost xs" data-ren="${esc(full)}" data-name="${esc(it.name)}">이름</button>`);
+    if (admin()) acts.push(`<button class="link-del" data-del="${esc(full)}">삭제</button>`);
     return `<tr><td>${nameCell}</td><td>${it.type === 'dir' ? '' : fmtSize(it.size)}</td><td class="muted">${fmtTime(it.mtime)}</td><td class="row-act">${acts.join('')}</td></tr>`;
   }).join('');
-  $('#fmBody').innerHTML = `<table class="tbl"><thead><tr><th>이름</th><th>크기</th><th>수정</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan=4 class="muted">빈 폴더</td></tr>'}</tbody></table>`;
-  $('#fmBody').querySelectorAll('a[data-dir]').forEach((a) => a.onclick = () => loadFiles(a.dataset.dir));
-  $('#fmBody').querySelectorAll('button[data-edit]').forEach((b) => b.onclick = () => editFile(b.dataset.edit));
-  $('#fmBody').querySelectorAll('button[data-del]').forEach((b) => b.onclick = async () => {
+  $('#fmBody').innerHTML = `<table class="tbl"><thead><tr>
+    <th class="sortable" data-sk="name">이름${ic('name')}</th>
+    <th class="sortable" data-sk="size">크기${ic('size')}</th>
+    <th class="sortable" data-sk="mtime">수정${ic('mtime')}</th><th></th></tr></thead>
+    <tbody>${rows || '<tr><td colspan=4 class="muted">표시할 항목이 없습니다</td></tr>'}</tbody></table>`;
+  const body = $('#fmBody');
+  body.querySelectorAll('th.sortable').forEach((th) => th.onclick = () => { const k = th.dataset.sk; if (fmState.sortKey === k) fmState.sortDir *= -1; else { fmState.sortKey = k; fmState.sortDir = 1; } renderFiles(); });
+  body.querySelectorAll('a[data-dir]').forEach((a) => a.onclick = () => loadFiles(a.dataset.dir));
+  body.querySelectorAll('button[data-edit]').forEach((b) => b.onclick = () => editFile(b.dataset.edit));
+  body.querySelectorAll('button[data-ren]').forEach((b) => b.onclick = async () => {
+    const nn = await modal({ title: '이름 바꾸기', input: true, value: b.dataset.name, ok: '변경' });
+    if (nn && nn !== b.dataset.name) { try { await post(`${SP()}/files/rename`, { path: b.dataset.ren, newName: nn }); loadFiles(fmState.path); } catch (e) { toast(e.message, true); } }
+  });
+  body.querySelectorAll('button[data-del]').forEach((b) => b.onclick = async () => {
     if (!(await modal({ title: '삭제', text: `${b.dataset.del} 삭제?`, danger: true, ok: '삭제' }))) return;
-    try { await post(`${SP()}/files/delete`, { path: b.dataset.del }); loadFiles(filePath); } catch (e) { toast(e.message, true); }
+    try { await post(`${SP()}/files/delete`, { path: b.dataset.del }); loadFiles(fmState.path); } catch (e) { toast(e.message, true); }
   });
 }
 async function editFile(p) {
   let d; try { d = await api(`${SP()}/file?path=` + encodeURIComponent(p)); } catch (e) { return toast(e.message, true); }
-  $('#view').innerHTML = `<section class="panel"><div class="panel-head"><div class="panel-title">편집: /${esc(p)}</div>
-    <div><button class="ghost small" id="edCancel">취소</button><button class="start small" id="edSave">저장</button></div></div>
+  $('#view').innerHTML = `<section class="panel"><div class="panel-head"><div class="panel-title">📝 /${esc(p)}</div>
+    <div><span class="muted" style="margin-right:10px">Ctrl+S 저장</span><button class="ghost small" id="edCancel">← 목록</button><button class="start small" id="edSave">저장</button></div></div>
     <textarea id="edArea" class="editor" spellcheck="false"></textarea></section>`;
-  $('#edArea').value = d.content;
-  $('#edCancel').onclick = () => loadBackToFiles();
-  $('#edSave').onclick = async () => { try { await post(`${SP()}/file`, { path: p, content: $('#edArea').value }); toast('저장했습니다.'); } catch (e) { toast(e.message, true); } };
+  const area = $('#edArea'); area.value = d.content;
+  const save = async () => { try { await post(`${SP()}/file`, { path: p, content: area.value }); toast('저장했습니다.'); } catch (e) { toast(e.message, true); } };
+  $('#edCancel').onclick = () => viewFiles().then(() => loadFiles(fmState.path));
+  $('#edSave').onclick = save;
+  area.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); save(); } });
+  area.focus();
 }
-function loadBackToFiles() { viewFiles().then(() => loadFiles(filePath)); }
 
 /* ===== 탭: 월드 ===== */
 async function viewWorld() {

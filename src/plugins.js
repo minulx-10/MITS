@@ -61,12 +61,16 @@ async function remove(id, file) {
 
 // ---- Modrinth 연동 (Aternos 애드온 카탈로그 대체) ----
 async function search(query) {
+  const q = (query || '').trim();
   const facets = JSON.stringify([['project_type:plugin']]);
-  const url = `https://api.modrinth.com/v2/search?limit=20&query=${encodeURIComponent(query || '')}&facets=${encodeURIComponent(facets)}`;
+  // 검색어 없으면 다운로드순(인기) 정렬로 인기 플러그인 노출
+  const index = q ? 'relevance' : 'downloads';
+  const url = `https://api.modrinth.com/v2/search?limit=24&index=${index}&query=${encodeURIComponent(q)}&facets=${encodeURIComponent(facets)}`;
   const res = await fetch(url, { headers: UA });
-  if (!res.ok) throw new Error('Modrinth 검색 실패');
+  if (!res.ok) throw new Error('Modrinth 검색 실패 (HTTP ' + res.status + ')');
   const data = await res.json();
   return {
+    popular: !q,
     items: (data.hits || []).map((h) => ({
       id: h.project_id,
       slug: h.slug,

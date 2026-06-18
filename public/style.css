@@ -195,3 +195,47 @@ select:focus { border-color: var(--green-b); }
 .modal p { white-space: pre-wrap; word-break: break-word; }
 
 button.small, a.small { padding: 7px 12px; font-size: 12px; border-radius: 8px; text-decoration: none; display: inline-block; }
+
+/* ===== 플레이어 상세(NBT) ===== */
+.pd-wrap { display: grid; grid-template-columns: 200px 1fr; gap: 0; min-height: 320px; }
+.pd-list { border-right: 1px solid var(--border); padding: 8px; max-height: 520px; overflow: auto; display: flex; flex-direction: column; gap: 4px; }
+.pd-item { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; background: transparent; border: 1px solid transparent; color: var(--text); padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+.pd-item:hover { background: var(--panel2); }
+.pd-item.active { background: rgba(47,174,94,.15); border-color: var(--border); color: var(--green-b); }
+.pd-item .muted { font-size: 10px; }
+.pd-detail { padding: 16px 18px; overflow: auto; max-height: 520px; }
+.pd-headline { font-size: 16px; font-weight: 800; margin-bottom: 12px; }
+.pd-headline .muted { font-size: 11px; font-weight: 400; }
+.pd-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap: 8px; }
+.pd-stat { display: flex; justify-content: space-between; gap: 10px; background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+.pd-stat .k { color: var(--muted); }
+.pd-stat .v { font-weight: 700; text-align: right; word-break: break-all; }
+.pd-section { margin-top: 16px; }
+.pd-section h4 { margin: 0 0 8px; font-size: 14px; }
+.pd-items { display: flex; flex-wrap: wrap; gap: 6px; }
+.pd-slot { background: var(--panel2); border: 1px solid var(--border); border-radius: 7px; padding: 5px 9px; font-size: 12px; font-family: ui-monospace, Consolas, monospace; }
+.pd-slot b { color: var(--green-b); }
+
+/* ===== 칩 / Modrinth 아이콘 ===== */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.chip { background: var(--panel2); border: 1px solid var(--border); color: var(--text); border-radius: 999px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; }
+.chip:hover { border-color: var(--green-b); color: var(--green-b); }
+.mr-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.mr-ico { width: 28px; height: 28px; border-radius: 6px; object-fit: cover; background: var(--panel2); display: inline-flex; align-items: center; justify-content: center; }
+.mr-ico.ph { font-size: 18px; }
+.mr-top .mr-title { margin: 0; }
+
+/* ===== 파일 매니저 추가 ===== */
+.fm-crumb { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; font-size: 13px; }
+.fm-cr { color: var(--green-b); cursor: pointer; text-decoration: none; padding: 2px 4px; border-radius: 5px; }
+.fm-cr:hover { background: var(--panel2); }
+.fm-sep { color: var(--muted); }
+.fm-filter { padding: 6px 10px; border-radius: 8px; background: var(--panel2); border: 1px solid var(--border); color: var(--text); outline: none; font-size: 12px; min-width: 140px; }
+.fm-filter:focus { border-color: var(--green-b); }
+th.sortable { cursor: pointer; user-select: none; }
+th.sortable:hover { color: var(--green-b); }
+.fm-body { position: relative; }
+.fm-drop { position: absolute; inset: 8px; border: 2px dashed var(--green-b); border-radius: 12px; background: rgba(47,174,94,.08); color: var(--green-b); display: none; align-items: center; justify-content: center; font-weight: 700; pointer-events: none; }
+.fm-drop.show { display: flex; }
+
+@media (max-width: 620px) { .pd-wrap { grid-template-columns: 1fr; } .pd-list { border-right: 0; border-bottom: 1px solid var(--border); flex-direction: row; flex-wrap: wrap; } }

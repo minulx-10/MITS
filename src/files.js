@@ -75,8 +75,37 @@ async function mkdir(id, rel, name) {
   return { ok: true, message: '폴더를 만들었습니다.' };
 }
 
+async function createFile(id, rel, name) {
+  if (!name || /[/\\]/.test(name)) throw new Error('파일 이름이 올바르지 않습니다.');
+  const f = resolveInside(baseDir(id), path.join(rel || '.', name));
+  try {
+    await fs.access(f);
+    throw new Error('같은 이름의 파일이 이미 있습니다.');
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e;
+  }
+  await fs.writeFile(f, '', { flag: 'wx' });
+  return { ok: true, message: '파일을 만들었습니다.' };
+}
+
+async function rename(id, rel, newName) {
+  if (!newName || /[/\\]/.test(newName)) throw new Error('새 이름이 올바르지 않습니다.');
+  const base = baseDir(id);
+  const src = resolveInside(base, rel);
+  if (src === path.resolve(base)) throw new Error('루트는 이름을 바꿀 수 없습니다.');
+  const dst = resolveInside(path.dirname(src), newName);
+  try {
+    await fs.access(dst);
+    throw new Error('같은 이름이 이미 있습니다.');
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e;
+  }
+  await fs.rename(src, dst);
+  return { ok: true, message: '이름을 바꿨습니다.' };
+}
+
 function resolveDownload(id, rel) {
   return resolveInside(baseDir(id), rel);
 }
 
-module.exports = { list, read, write, remove, mkdir, resolveDownload, baseDir };
+module.exports = { list, read, write, remove, mkdir, createFile, rename, resolveDownload, baseDir };

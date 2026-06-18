@@ -19,6 +19,7 @@ const plugins = require('./src/plugins');
 const software = require('./src/software');
 const worlds = require('./src/worlds');
 const backups = require('./src/backups');
+const playerdata = require('./src/playerdata');
 
 const upload = multer({ dest: os.tmpdir(), limits: { fileSize: 2 * 1024 * 1024 * 1024 } });
 
@@ -87,6 +88,10 @@ app.post('/api/server/:id/logs/share', requireAdmin, A((req) => logs.share(req.p
 app.get('/api/server/:id/players', A((req) => players.lists(req.params.id).then((r) => ({ ok: true, ...r }))));
 app.post('/api/server/:id/players/:act', requireAdmin, A((req) => players.action(req.params.id, req.params.act, (req.body || {}).value)));
 
+// ===== 플레이어 상세(NBT: 인벤토리/체력/좌표/허기/엔더상자/착용/스폰 등) =====
+app.get('/api/server/:id/playerdata', A((req) => playerdata.list(req.params.id).then((r) => ({ ok: true, ...r }))));
+app.get('/api/server/:id/playerdata/:uuid', A((req) => playerdata.detail(req.params.id, req.params.uuid).then((r) => ({ ok: true, ...r }))));
+
 // ===== 소프트웨어 =====
 app.get('/api/server/:id/software', A((req) => software.current(req.params.id).then((r) => ({ ok: true, ...r }))));
 app.get('/api/paper/versions', A(() => software.versions().then((r) => ({ ok: true, ...r }))));
@@ -118,6 +123,8 @@ app.get('/api/server/:id/files', A((req) => files.list(req.params.id, req.query.
 app.get('/api/server/:id/file', A((req) => files.read(req.params.id, req.query.path).then((r) => ({ ok: true, ...r }))));
 app.post('/api/server/:id/file', requireAdmin, A((req) => files.write(req.params.id, (req.body || {}).path, (req.body || {}).content)));
 app.post('/api/server/:id/files/mkdir', requireAdmin, A((req) => files.mkdir(req.params.id, (req.body || {}).path, (req.body || {}).name)));
+app.post('/api/server/:id/files/newfile', requireAdmin, A((req) => files.createFile(req.params.id, (req.body || {}).path, (req.body || {}).name)));
+app.post('/api/server/:id/files/rename', requireAdmin, A((req) => files.rename(req.params.id, (req.body || {}).path, (req.body || {}).newName)));
 app.post('/api/server/:id/files/delete', requireAdmin, A((req) => files.remove(req.params.id, (req.body || {}).path)));
 app.get('/api/server/:id/files/download', A((req, res) => {
   const f = files.resolveDownload(req.params.id, req.query.path);
