@@ -1,0 +1,81 @@
+name: Deploy MITS to GSMSV
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-gsmsv
+      cancel-in-progress: false
+    steps:
+      - name: Deploy over SSH (provision Node + systemd)
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          PANEL_PASSWORD: ${{ secrets.PANEL_PASSWORD }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+        with:
+          host: ssh.gsmsv.site
+          port: 24160
+          username: ubuntu
+          password: ${{ secrets.SERVER_PASSWORD }}
+          envs: PANEL_PASSWORD,SESSION_SECRET
+          command_timeout: 20m
+          script: |
+            set -e
+
+            echo "[1/5] 필수 패키지 확인 (git, curl, node)"
+            NEED_APT=0
+            command -v git  >/dev/null || NEED_APT=1
+            command -v curl >/dev/null || NEED_APT=1
+            command -v node >/dev/null || NEED_APT=1
+            if [ "$NEED_APT" = 1 ]; then sudo apt-get update -y; fi
+            command -v git  >/dev/null || sudo apt-get install -y git
+            command -v curl >/dev/null || sudo apt-get install -y curl
+            if ! command -v node >/dev/null; then
+              echo "Node.js 22 설치 중..."
+              curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+              sudo apt-get install -y nodejs
+            fi
+            echo "node $(node -v) / npm $(npm -v)"
+
+            echo "[2/5] 레포 동기화 (~/MITS)"
+            if [ -d ~/MITS/.git ]; then
+              git -C ~/MITS fetch --all --quiet
+              git -C ~/MITS reset --hard origin/main
+            else
+              rm -rf ~/MITS
+              git clone --depth 1 https://github.com/minulx-10/MITS.git ~/MITS
+            fi
+            cd ~/MITS
+
+            echo "[3/5] 의존성 설치"
+            if [ -f package-lock.json ]; then
+              npm ci --omit=dev
+            else
+              npm install --omit=dev
+            fi
+
+            echo "[4/5] 환경설정(.env) 작성"
+            umask 077
+            printf 'PANEL_HOST=127.0.0.1\nPANEL_PORT=3000\nPANEL_PASSWORD=%s\nSESSION_SECRET=%s\nTMUX_TMPDIR=/tmp\n' \
+              "$PANEL_PASSWORD" "$SESSION_SECRET" > ~/MITS/.env
+
+            echo "[5/5] systemd 서비스 등록 및 재시작"
+            sudo cp ~/MITS/scripts/mits.service /etc/systemd/system/mits.service
+            sudo systemctl daemon-reload
+            sudo systemctl enable mits
+            sudo systemctl restart mits
+
+            echo "헬스체크..."
+            sleep 3
+            if curl -fsS http://127.0.0.1:3000/api/me >/dev/null; then
+              echo "✅ MITS 패널 정상 기동 (http://127.0.0.1:3000)"
+            else
+              echo "❌ 패널 기동 실패 — 최근 로그:"
+              sudo journalctl -u mits -n 40 --no-pager || true
+              exit 1
+            fi

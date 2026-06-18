@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MITS · 대시보드</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">⛏ MITS <span class="brand-sub">Minecraft 관리 패널</span></div>
+    <div class="sysbar" id="sysbar"></div>
+    <button class="ghost" id="logout">로그아웃</button>
+  </header>
+
+  <main class="wrap">
+    <section class="cards" id="cards"></section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div class="tabs" id="tabs"></div>
+        <button class="ghost small" id="refreshConsole">새로고침</button>
+      </div>
+      <pre class="console" id="console">콘솔을 불러오는 중…</pre>
+      <form class="cmd" id="cmdForm">
+        <span class="prompt">&gt;</span>
+        <input id="cmdInput" placeholder="콘솔 명령 입력 (예: list, say 안녕, op 닉네임)" autocomplete="off" />
+        <button type="submit">전송</button>
+      </form>
+    </section>
+
+    <section class="info">
+      <h3>접속 정보</h3>
+      <p class="muted">GSMSV는 재시작마다 외부 포트가 바뀔 수 있습니다. 정확한 현재 포트는 GSMSV 대시보드에서 확인하세요.</p>
+      <ul>
+        <li><b>Java 에디션:</b> <code id="javaConn">ssh.gsmsv.site:&lt;외부포트&gt;</code></li>
+        <li><b>Bedrock/모바일:</b> 주소 <code>ssh.gsmsv.site</code>, 포트 <code>&lt;외부포트&gt;</code></li>
+        <li><b>이 패널:</b> SSH 터널 <code id="tunnel">ssh -p 24160 -L 8080:127.0.0.1:3000 ubuntu@ssh.gsmsv.site</code></li>
+      </ul>
+    </section>
+  </main>
+
+  <div class="toast" id="toast"></div>
+
+  <div class="modal-bg" id="modalBg">
+    <div class="modal">
+      <h3 id="modalTitle">확인</h3>
+      <p id="modalText"></p>
+      <div class="modal-actions">
+        <button class="ghost" id="modalCancel">취소</button>
+        <button class="danger" id="modalOk">실행</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

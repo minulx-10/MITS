@@ -1,0 +1,19 @@
+[Unit]
+Description=MITS - Minecraft 서버 관리 패널
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/MITS
+Environment=NODE_ENV=production
+# mc1/mc2 세션과 같은 tmux 소켓(/tmp/tmux-<uid>/default)을 공유하기 위해 고정
+Environment=TMUX_TMPDIR=/tmp
+EnvironmentFile=/home/ubuntu/MITS/.env
+ExecStart=/usr/bin/env node /home/ubuntu/MITS/server.js
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
