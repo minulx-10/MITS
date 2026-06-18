@@ -6,11 +6,11 @@ const state = { server: 'server1', tab: 'dashboard', role: null, servers: [] };
 let pollTimer = null;
 
 const TABS = [
-  ['dashboard', '대시보드'], ['console', '콘솔'], ['log', '로그'], ['players', '플레이어'],
-  ['software', '소프트웨어'], ['plugins', '플러그인'], ['files', '파일'], ['world', '월드'],
-  ['backups', '백업'], ['access', '액세스'],
+  ['dashboard', '대시보드'], ['options', '설정'], ['console', '콘솔'], ['log', '로그'],
+  ['players', '플레이어'], ['software', '소프트웨어'], ['plugins', '플러그인'], ['files', '파일'],
+  ['world', '월드'], ['backups', '백업'], ['access', '액세스'],
 ];
-const STATE_LABEL = { running: '실행 중', stopped: '정지됨', starting: '시작 중' };
+const STATE_LABEL = { running: '실행 중', stopped: '정지됨', starting: '시작 중', stopping: '종료 중', restarting: '재시작 중' };
 const admin = () => state.role === 'admin';
 
 function esc(s) {
@@ -101,24 +101,61 @@ const SP = () => `/api/server/${state.server}`;
 async function viewDashboard() {
   $('#view').innerHTML = `<div id="cards" class="cards"></div>
     <section class="info">
-      <h3>접속 정보 <button class="ghost small" id="copyAddr">주소 복사</button></h3>
-      <p class="muted">GSMSV는 재시작마다 외부 포트가 바뀔 수 있습니다. 정확한 현재 포트는 GSMSV 대시보드에서 확인하세요.</p>
+      <h3>접속 정보 
+        <button class="ghost small" id="copyAddr">주소 복사</button>
+        ${admin() ? '<button class="ghost small" id="editPort" style="margin-left: 6px">외부 포트 설정</button>' : ''}
+      </h3>
+      <p class="muted">GSMSV는 재시작마다 외부 포트가 바뀔 수 있습니다. 외부 포트를 설정하면 아래 접속 정보에 바로 반영됩니다.</p>
       <ul>
         <li><b>PC(Java):</b> <code id="addrJava">ssh.gsmsv.site:&lt;외부포트&gt;</code></li>
-        <li><b>모바일/Bedrock:</b> 주소 <code>ssh.gsmsv.site</code> · 포트 <code>&lt;외부포트&gt;</code></li>
+        <li><b>모바일/Bedrock:</b> 주소 <code>ssh.gsmsv.site</code> · 포트 <code id="addrBedrock">&lt;외부포트&gt;</code></li>
         <li><b>이 패널:</b> <code>ssh -p 24160 -L 8080:127.0.0.1:3000 ubuntu@ssh.gsmsv.site</code></li>
       </ul>
     </section>`;
-  $('#copyAddr').onclick = () => { navigator.clipboard.writeText('ssh.gsmsv.site').then(() => toast('주소를 복사했습니다.')); };
+  $('#copyAddr').onclick = () => {
+    const text = $('#addrJava').textContent;
+    navigator.clipboard.writeText(text).then(() => toast('주소를 복사했습니다.'));
+  };
+  if (admin()) {
+    $('#editPort').onclick = async () => {
+      const curS = (state.serversStatus || []).find(s => s.id === state.server);
+      const curPort = curS ? (curS.extPort || '') : '';
+      const port = await modal({
+        title: '외부 포트 설정',
+        text: `현재 서버(${curName()})의 외부 포트 번호를 입력하세요:`,
+        input: true,
+        placeholder: '예: 25565',
+        value: String(curPort),
+        ok: '저장'
+      });
+      if (port === null) return;
+      try {
+        const r = await post(`${SP()}/extport`, { extPort: port });
+        toast(r.message || '설정 완료');
+        await refreshDashboard();
+      } catch (err) {
+        toast(err.message, true);
+      }
+    };
+  }
   await refreshDashboard();
   pollTimer = setInterval(refreshDashboard, 4000);
 }
 async function refreshDashboard() {
   let data;
   try { data = await api('/api/status'); } catch { return; }
+  state.serversStatus = data.servers;
   renderSysbar(data.system);
   const cards = data.servers.map(serverCard).join('') + globalCard();
   $('#cards').innerHTML = cards;
+
+  // Update connection info
+  const curS = data.servers.find(s => s.id === state.server);
+  if (curS) {
+    const extPort = curS.extPort || '<외부포트>';
+    $('#addrJava').textContent = `ssh.gsmsv.site:${extPort}`;
+    $('#addrBedrock').textContent = String(extPort);
+  }
 }
 function renderSysbar(sys) {
   if (!sys) return;
@@ -131,21 +168,28 @@ function renderSysbar(sys) {
 }
 function serverCard(s) {
   const label = STATE_LABEL[s.state] || s.state;
-  const ram = s.rssMB != null ? `${(s.rssMB / 1024).toFixed(2)} GiB` : '—';
-  const busy = s.state === 'running' || s.state === 'starting';
-  const dis = admin() ? '' : 'disabled';
+  const ram = s.rssMB != null ? `${(s.rssMB / 1024).toFixed(2)} GiB / ${s.maxRam || '—'}` : `— / ${s.maxRam || '—'}`;
+  
+  const canStart = s.state === 'stopped';
+  const canStop = s.state === 'running' || s.state === 'starting';
+  const canRestart = s.state === 'running' || s.state === 'starting';
+
+  const startDis = canStart && admin() ? '' : 'disabled';
+  const stopDis = canStop && admin() ? '' : 'disabled';
+  const restartDis = canRestart && admin() ? '' : 'disabled';
+
   return `<div class="card">
     <div class="card-head"><div class="card-title">${esc(s.name)}</div>
       <span class="badge ${s.state}"><span class="dot ${s.state}"></span>${label}</span></div>
     <div class="meta">
       <span class="k">tmux 세션</span><span class="v">${s.session}</span>
       <span class="k">내부 포트</span><span class="v">${s.port}</span>
-      <span class="k">메모리(RSS)</span><span class="v">${ram}</span>
+      <span class="k">메모리(최대)</span><span class="v">${ram}</span>
       <span class="k">상태</span><span class="v">${label}</span></div>
     <div class="btns">
-      <button class="start" data-act="start" data-id="${s.id}" ${busy ? 'disabled' : dis}>시작</button>
-      <button class="stop" data-act="stop" data-id="${s.id}" ${busy ? dis : 'disabled'}>정지</button>
-      <button class="restart" data-act="restart" data-id="${s.id}" ${busy ? dis : 'disabled'}>재시작</button>
+      <button class="start" data-act="start" data-id="${s.id}" ${startDis}>시작</button>
+      <button class="stop" data-act="stop" data-id="${s.id}" ${stopDis}>정지</button>
+      <button class="restart" data-act="restart" data-id="${s.id}" ${restartDis}>재시작</button>
     </div></div>`;
 }
 function globalCard() {
@@ -156,6 +200,211 @@ function globalCard() {
     <div class="btns">
       <button class="start" data-act="startall" ${dis}>전체 시작</button>
       <button class="stop" data-act="stopall" ${dis}>전체 정지</button></div></div>`;
+}
+
+/* ===== 탭: 설정 ===== */
+async function viewOptions() {
+  $('#view').innerHTML = `<section class="info">
+    <h3>서버 설정 (server.properties) — ${esc(curName())}</h3>
+    <p class="muted">Aternos의 설정 화면과 동일한 핵심 마인크래프트 설정을 편집합니다. <b>설정을 수정한 후 서버를 재시작해야 반영됩니다.</b></p>
+    <div id="propsLoader" class="muted">설정을 불러오는 중…</div>
+    <div id="propsForm" style="display:none">
+      <div class="props-grid">
+        <!-- slots -->
+        <div class="prop-item">
+          <div class="prop-meta">
+            <span class="prop-label">슬롯</span>
+            <span class="prop-sub">max-players</span>
+          </div>
+          <div class="prop-control">
+            <input type="number" id="prop-max-players" min="1" max="1000" class="prop-input-num" />
+          </div>
+        </div>
+        <!-- gamemode -->
+        <div class="prop-item">
+          <div class="prop-meta">
+            <span class="prop-label">게임 모드</span>
+            <span class="prop-sub">gamemode</span>
+          </div>
+          <div class="prop-control">
+            <select id="prop-gamemode">
+              <option value="survival">서바이벌</option>
+              <option value="creative">크리에이티브</option>
+              <option value="adventure">모험</option>
+              <option value="spectator">관전</option>
+            </select>
+          </div>
+        </div>
+        <!-- difficulty -->
+        <div class="prop-item">
+          <div class="prop-meta">
+            <span class="prop-label">난이도</span>
+            <span class="prop-sub">difficulty</span>
+          </div>
+          <div class="prop-control">
+            <select id="prop-difficulty">
+              <option value="peaceful">평화로움</option>
+              <option value="easy">쉬움</option>
+              <option value="normal">보통</option>
+              <option value="hard">어려움</option>
+            </select>
+          </div>
+        </div>
+        <!-- white-list -->
+        <div class="prop-item">
+          <div class="prop-meta">
+            <span class="prop-label">화이트리스트</span>
+            <span class="prop-sub">white-list</span>
+          </div>
+          <div class="prop-control">
+            <button class="toggle-btn" id="btn-white-list" data-val="false"></button>
+          </div>
+        </div>
+        <!-- online-mode (rendered as offline-mode) -->
+        <div class="prop-item">
+          <div class="prop-meta">
+            <span class="prop-label">오프라인 모드</span>
+            <span class="prop-sub">online-mode=false</span>
+          </div>
+          <div class="prop-control">
+            <button class="toggle-btn" id="btn-offline-mode" data-val="false"></button>
+          </div>
+        </div>
+        <!-- allow-flight -->
+        <div class="prop-item">
+          <div class="prop-meta">
+            <span class="prop-label">비행 허용</span>
+            <span class="prop-sub">allow-flight</span>
+          </div>
+          <div class="prop-control">
+            <button class="toggle-btn" id="btn-allow-flight" data-val="false"></button>
+          </div>
+        </div>
+        <!-- force-gamemode -->
+        <div class="prop-item">
+          <div class="prop-meta">
+            <span class="prop-label">게임모드 강제설정</span>
+            <span class="prop-sub">force-gamemode</span>
+          </div>
+          <div class="prop-control">
+            <button class="toggle-btn" id="btn-force-gamemode" data-val="false"></button>
+          </div>
+        </div>
+        <!-- spawn-protection -->
+        <div class="prop-item">
+          <div class="prop-meta">
+            <span class="prop-label">스폰 보호</span>
+            <span class="prop-sub">spawn-protection</span>
+          </div>
+          <div class="prop-control">
+            <input type="number" id="prop-spawn-protection" min="0" max="65535" class="prop-input-num" />
+          </div>
+        </div>
+        <!-- require-resource-pack -->
+        <div class="prop-item">
+          <div class="prop-meta">
+            <span class="prop-label">리소스 팩 강제 사용</span>
+            <span class="prop-sub">require-resource-pack</span>
+          </div>
+          <div class="prop-control">
+            <button class="toggle-btn" id="btn-require-resource-pack" data-val="false"></button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Resource Pack Inputs (Full Width) -->
+      <div class="props-full">
+        <div class="prop-item-full">
+          <span class="prop-label">리소스 팩 URL</span>
+          <span class="prop-sub" style="margin-bottom:6px">resource-pack</span>
+          <input type="text" id="prop-resource-pack" placeholder="https://example.com/resource-pack.zip" />
+        </div>
+        <div class="prop-item-full">
+          <span class="prop-label">리소스 팩 알림 메시지</span>
+          <span class="prop-sub" style="margin-bottom:6px">resource-pack-prompt</span>
+          <input type="text" id="prop-resource-pack-prompt" placeholder="리소스 팩을 적용해 주세요." />
+        </div>
+      </div>
+
+      <div style="margin-top:20px; display:flex; justify-content:flex-end">
+        <button class="start" id="savePropsBtn" ${admin() ? '' : 'disabled'}>설정 저장</button>
+      </div>
+    </div>
+  </section>`;
+
+  if (admin()) {
+    // Toggle button click handlers
+    $('#propsForm').addEventListener('click', (e) => {
+      const btn = e.target.closest('.toggle-btn');
+      if (!btn) return;
+      const isTrue = btn.dataset.val === 'true';
+      setToggleBtn(btn, !isTrue);
+    });
+
+    $('#savePropsBtn').onclick = saveProperties;
+  }
+
+  await loadProperties();
+}
+
+function setToggleBtn(btn, isTrue) {
+  btn.dataset.val = isTrue ? 'true' : 'false';
+  btn.className = 'toggle-btn ' + (isTrue ? 'true' : 'false');
+  btn.innerHTML = isTrue ? '✓' : '✗';
+}
+
+async function loadProperties() {
+  try {
+    const d = await api(`${SP()}/properties`);
+    const p = d.properties;
+
+    $('#prop-max-players').value = p['max-players'];
+    $('#prop-gamemode').value = p['gamemode'];
+    $('#prop-difficulty').value = p['difficulty'];
+    $('#prop-spawn-protection').value = p['spawn-protection'];
+    $('#prop-resource-pack').value = p['resource-pack'];
+    $('#prop-resource-pack-prompt').value = p['resource-pack-prompt'];
+
+    setToggleBtn($('#btn-white-list'), p['white-list']);
+    setToggleBtn($('#btn-offline-mode'), !p['online-mode']); // 오프라인 모드 = !online-mode
+    setToggleBtn($('#btn-allow-flight'), p['allow-flight']);
+    setToggleBtn($('#btn-force-gamemode'), p['force-gamemode']);
+    setToggleBtn($('#btn-require-resource-pack'), p['require-resource-pack']);
+
+    if (!admin()) {
+      $('#propsForm').querySelectorAll('input, select').forEach(el => el.disabled = true);
+      $('#propsForm').querySelectorAll('.toggle-btn').forEach(el => el.disabled = true);
+    }
+
+    $('#propsLoader').style.display = 'none';
+    $('#propsForm').style.display = 'block';
+  } catch (e) {
+    $('#propsLoader').textContent = '설정을 불러오지 못했습니다: ' + e.message;
+  }
+}
+
+async function saveProperties() {
+  const payload = {
+    'max-players': parseInt($('#prop-max-players').value, 10) || 20,
+    'gamemode': $('#prop-gamemode').value,
+    'difficulty': $('#prop-difficulty').value,
+    'white-list': $('#btn-white-list').dataset.val === 'true',
+    'online-mode': $('#btn-offline-mode').dataset.val !== 'true', // online-mode = !offline-mode
+    'allow-flight': $('#btn-allow-flight').dataset.val === 'true',
+    'force-gamemode': $('#btn-force-gamemode').dataset.val === 'true',
+    'spawn-protection': parseInt($('#prop-spawn-protection').value, 10) || 0,
+    'require-resource-pack': $('#btn-require-resource-pack').dataset.val === 'true',
+    'resource-pack': $('#prop-resource-pack').value.trim(),
+    'resource-pack-prompt': $('#prop-resource-pack-prompt').value.trim()
+  };
+
+  try {
+    toast('설정 저장 중…');
+    const r = await post(`${SP()}/properties`, payload);
+    toast(r.message || '설정을 저장했습니다.');
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 /* ===== 탭: 콘솔 ===== */
@@ -238,7 +487,38 @@ async function viewPlayers() {
 async function loadPlayerDataList() {
   let d; try { d = await api(`${SP()}/playerdata`); } catch (e) { $('#pdList').textContent = e.message; return; }
   if (!d.items.length) { $('#pdList').innerHTML = '<p class="muted" style="padding:10px">접속 기록(playerdata)이 없습니다.</p>'; return; }
-  $('#pdList').innerHTML = d.items.map((p) => `<button class="pd-item" data-uuid="${esc(p.uuid)}"><b>${esc(p.name)}</b><span class="muted">${esc(p.uuid.slice(0, 13))}…</span></button>`).join('');
+
+  const onlineItems = d.items.filter(p => p.online);
+  const offlineItems = d.items.filter(p => !p.online);
+
+  const renderItem = (p) => {
+    const isBedrock = p.uuid.startsWith('00000000-0000-0000-0009-');
+    const avatarUrl = isBedrock ? 'https://mc-heads.net/avatar/steve/28' : `https://mc-heads.net/avatar/${esc(p.uuid)}/28`;
+    return `
+      <button class="pd-item ${p.online ? 'online' : 'offline'}" data-uuid="${esc(p.uuid)}">
+        <img src="${avatarUrl}" class="pd-avatar" alt="" />
+        <div class="pd-item-meta">
+          <div class="pd-item-header">
+            <span class="pd-item-name">${esc(p.name)}</span>
+            <span class="pd-status-indicator ${p.online ? 'online' : 'offline'}"></span>
+          </div>
+          <span class="pd-item-uuid">${isBedrock ? 'Bedrock' : 'Java'} · ${esc(p.uuid.slice(0, 14))}…</span>
+        </div>
+      </button>`;
+  };
+
+  let html = '';
+  if (onlineItems.length > 0) {
+    html += `<div class="pd-group-title">🟢 접속 중 (${onlineItems.length})</div>`;
+    html += onlineItems.map(renderItem).join('');
+  }
+  if (offlineItems.length > 0) {
+    html += `<div class="pd-group-title">⚫ 오프라인 (${offlineItems.length})</div>`;
+    html += offlineItems.map(renderItem).join('');
+  }
+
+  $('#pdList').innerHTML = html;
+
   $('#pdList').querySelectorAll('button[data-uuid]').forEach((b) => b.onclick = () => {
     $('#pdList').querySelectorAll('.pd-item').forEach((x) => x.classList.remove('active'));
     b.classList.add('active'); showPlayerDetail(b.dataset.uuid);
@@ -247,22 +527,150 @@ async function loadPlayerDataList() {
 async function showPlayerDetail(uuid) {
   $('#pdDetail').innerHTML = '<p class="muted">불러오는 중…</p>';
   let d; try { d = await api(`${SP()}/playerdata/${uuid}`); } catch (e) { $('#pdDetail').innerHTML = `<p class="muted">${esc(e.message)}</p>`; return; }
+
   const stat = (k, v) => `<div class="pd-stat"><span class="k">${k}</span><span class="v">${v}</span></div>`;
-  const items = (arr) => arr.length ? `<div class="pd-items">${arr.map((i) => `<span class="pd-slot" title="슬롯 ${i.slot}">${esc(i.id)}${i.count > 1 ? ` <b>×${i.count}</b>` : ''}</span>`).join('')}</div>` : '<p class="muted">비어 있음</p>';
+
+  const getArmorSlot = (slotNum) => (d.armor || []).find((a) => a.slot === slotNum);
+  const helmet = getArmorSlot(103);
+  const chestplate = getArmorSlot(102);
+  const leggings = getArmorSlot(101);
+  const boots = getArmorSlot(100);
+  const offhand = (d.armor || []).find((a) => a.slot === -106);
+
+  const getTextureUrl = (id) => `https://assets.mcasset.cloud/1.20.1/assets/minecraft/textures/item/${esc(id)}.png`;
+  const imgFallback = `onerror="if(!this.dataset.triedBlock){this.dataset.triedBlock=true;this.src=this.src.replace('/textures/item/', '/textures/block/');}else{this.remove();}"`;
+
+  const renderEq = (item, icon, label) => {
+    if (item) {
+      const disp = item.id.replace(/_/g, ' ');
+      return `<div class="eq-slot occupied" title="${esc(label)}: ${esc(disp)}" data-item="${esc(item.id)}">
+        <img src="${getTextureUrl(item.id)}" class="mc-item-icon" ${imgFallback} />
+        <span class="mc-item-fallback">${esc(item.id.slice(0, 3).toUpperCase())}</span>
+        ${item.count > 1 ? `<span class="mc-count">${item.count}</span>` : ''}
+      </div>`;
+    }
+    return `<div class="eq-slot empty" title="${esc(label)} 비어 있음"><span class="eq-icon">${icon}</span></div>`;
+  };
+
+  const renderInventory = (invItems) => {
+    const slots = Array(36).fill(null);
+    for (const i of invItems) {
+      if (i.slot != null && i.slot >= 0 && i.slot < 36) slots[i.slot] = i;
+    }
+    const visualOrder = [
+      ...Array.from({ length: 27 }, (_, i) => i + 9),
+      ...Array.from({ length: 9 }, (_, i) => i)
+    ];
+    return `<div class="mc-grid">
+      ${visualOrder.map((idx) => {
+        const i = slots[idx];
+        const isHotbar = idx < 9;
+        const cls = `mc-slot ${i ? 'occupied' : 'empty'} ${isHotbar ? 'hotbar' : ''}`;
+        if (i) {
+          const disp = i.id.replace(/_/g, ' ');
+          return `<div class="${cls}" title="${esc(disp)} (슬롯 ${idx})" data-item="${esc(i.id)}">
+            <img src="${getTextureUrl(i.id)}" class="mc-item-icon" ${imgFallback} />
+            <span class="mc-item-fallback">${esc(i.id.slice(0, 3).toUpperCase())}</span>
+            ${i.count > 1 ? `<span class="mc-count">${i.count}</span>` : ''}
+          </div>`;
+        }
+        return `<div class="${cls}" title="비어 있음 (슬롯 ${idx})"></div>`;
+      }).join('')}
+    </div>`;
+  };
+
+  const renderEnder = (enderItems) => {
+    const slots = Array(27).fill(null);
+    for (const i of enderItems) {
+      if (i.slot != null && i.slot >= 0 && i.slot < 27) slots[i.slot] = i;
+    }
+    return `<div class="mc-grid">
+      ${slots.map((i, idx) => {
+        const cls = `mc-slot ${i ? 'occupied' : 'empty'}`;
+        if (i) {
+          const disp = i.id.replace(/_/g, ' ');
+          return `<div class="${cls}" title="${esc(disp)} (슬롯 ${idx})" data-item="${esc(i.id)}">
+            <img src="${getTextureUrl(i.id)}" class="mc-item-icon" ${imgFallback} />
+            <span class="mc-item-fallback">${esc(i.id.slice(0, 3).toUpperCase())}</span>
+            ${i.count > 1 ? `<span class="mc-count">${i.count}</span>` : ''}
+          </div>`;
+        }
+        return `<div class="${cls}" title="비어 있음 (슬롯 ${idx})"></div>`;
+      }).join('')}
+    </div>`;
+  };
+
   const pos = d.pos ? `${d.pos[0]}, ${d.pos[1]}, ${d.pos[2]}` : '—';
   const spawn = d.spawn ? `${d.spawn.x}, ${d.spawn.y}, ${d.spawn.z}` : '설정 안 됨';
-  const armor = (d.armor || []).map((a) => `${a.label}=${esc(a.id)}`).join(' · ') || '없음';
+
+  const isBedrock = d.uuid.startsWith('00000000-0000-0000-0009-');
+  const bodySkinUrl = isBedrock ? 'https://mc-heads.net/body/steve/140' : `https://mc-heads.net/body/${esc(d.uuid)}/140`;
+  const bodyFallbackUrl = isBedrock ? 'https://mc-heads.net/avatar/steve/96' : `https://mc-heads.net/avatar/${esc(d.uuid)}/96`;
+
+  let statusHtml = '';
+  if (d.online) {
+    statusHtml = `<span class="pd-status-badge online">🟢 접속 중</span>`;
+  } else {
+    const lastPlayed = d.mtime ? new Date(d.mtime).toLocaleString() : '기록 없음';
+    statusHtml = `<span class="pd-status-badge offline">⚫ 오프라인 (마지막 접속: ${lastPlayed})</span>`;
+  }
+
+  let playTimeStr = '기록 없음';
+  if (d.playTimeSeconds) {
+    const hours = Math.floor(d.playTimeSeconds / 3600);
+    const minutes = Math.floor((d.playTimeSeconds % 3600) / 60);
+    if (hours > 0) {
+      playTimeStr = `${hours}시간 ${minutes}분`;
+    } else {
+      playTimeStr = `${minutes}분`;
+    }
+  }
+
   $('#pdDetail').innerHTML = `
-    <div class="pd-headline">${esc(d.name)} <span class="muted">${esc(d.uuid)}</span></div>
-    <div class="pd-stats">
-      ${stat('좌표 (XYZ)', pos)}${stat('차원', esc(d.dimension || '—'))}
-      ${stat('체력', d.health != null ? `${d.health} / 20 ♥` : '—')}${stat('허기', d.food != null ? `${d.food} / 20 🍗 (포화 ${d.saturation ?? 0})` : '—')}
-      ${stat('경험치', d.xpLevel != null ? `Lv ${d.xpLevel} (총 ${d.xpTotal ?? '?'})` : '—')}${stat('게임모드', esc(d.gameTypeName))}
-      ${stat('스폰 포인트', spawn)}${stat('착용 장비', esc(armor))}
-      ${d.offhand ? stat('오프핸드', esc(d.offhand.id) + (d.offhand.count > 1 ? ` ×${d.offhand.count}` : '')) : ''}
+    <div class="pd-profile-section">
+      <div class="pd-profile-eq">
+        <div class="pd-armor-col">
+          ${renderEq(helmet, '🪖', '머리')}
+          ${renderEq(chestplate, '👕', '몸통')}
+          ${renderEq(leggings, '👖', '다리')}
+          ${renderEq(boots, '🥾', '발')}
+        </div>
+        <div class="pd-skin-preview" title="${esc(d.name)}의 3D 스킨">
+          <img src="${bodySkinUrl}" onerror="this.src='${bodyFallbackUrl}'; this.style.height='96px';" alt="" />
+        </div>
+        <div class="pd-offhand-col">
+          ${renderEq(offhand, '🛡️', '오프핸드')}
+        </div>
+      </div>
+      <div class="pd-profile-info">
+        <div class="pd-profile-header">
+          <span class="pd-profile-name">${esc(d.name)}</span>
+          <span class="pd-badge gamemode-${d.gameType || 0}">${esc(d.gameTypeName || '생존')}</span>
+        </div>
+        <div class="pd-profile-status-row">
+          ${statusHtml}
+          <span class="pd-platform-badge ${isBedrock ? 'bedrock' : 'java'}">${isBedrock ? 'Bedrock' : 'Java'}</span>
+        </div>
+        <div class="pd-profile-uuid"><code>${esc(d.uuid)}</code></div>
+        <div class="pd-profile-stats">
+          ${stat('누적 플레이 시간', playTimeStr)}
+          ${stat('좌표 (XYZ)', pos)}
+          ${stat('차원', esc((d.dimension || 'overworld').replace('minecraft:', '').toUpperCase()))}
+          ${stat('체력', d.health != null ? `<span class="health-heart">${d.health} / 20 ❤️</span>` : '—')}
+          ${stat('허기', d.food != null ? `<span>${d.food} / 20 🍗 (포화 ${d.saturation ?? 0})</span>` : '—')}
+          ${stat('경험치', d.xpLevel != null ? `Lv ${d.xpLevel} (총 ${d.xpTotal ?? '?'})` : '—')}
+          ${stat('스폰 위치', spawn)}
+        </div>
+      </div>
     </div>
-    <div class="pd-section"><h4>🎒 인벤토리 (${d.inventory.length}칸 사용)</h4>${items(d.inventory)}</div>
-    <div class="pd-section"><h4>📦 엔더 상자 (${d.ender.length}칸 사용)</h4>${items(d.ender)}</div>`;
+    <div class="pd-section">
+      <h4>🎒 인벤토리 (${d.inventory.length} / 36 슬롯 사용)</h4>
+      ${renderInventory(d.inventory)}
+    </div>
+    <div class="pd-section">
+      <h4>📦 엔더 상자 (${d.ender.length} / 27 슬롯 사용)</h4>
+      ${renderEnder(d.ender)}
+    </div>`;
 }
 async function onPlayerBtn(e) {
   const b = e.target.closest('button[data-pact]'); if (!b) return;
@@ -591,6 +999,36 @@ document.addEventListener('click', async (e) => {
   if (act === 'stop' && !(await modal({ title: '서버 정지', text: `${name} 정지? 접속자가 끊깁니다.`, danger: true, ok: '정지' }))) return;
   if (act === 'restart' && !(await modal({ title: '서버 재시작', text: `${name} 재시작?`, danger: true, ok: '재시작' }))) return;
   if (act === 'stopall' && !(await modal({ title: '전체 정지', text: '두 서버 모두 정지?', danger: true, ok: '정지' }))) return;
+
+  if (act === 'start') {
+    const other = (state.serversStatus || []).find((s) => s.id !== id);
+    if (other && (other.state === 'running' || other.state === 'starting') && other.maxRam === '5500M') {
+      const confirmRestart = await modal({
+        title: '서버 시작 (상대 서버 재시작 필요)',
+        text: `상대 서버(${other.name})가 5.5GB로 실행 중입니다. 동시 가동을 위해 상대 서버를 2.8GB로 재시작하시겠습니까?`,
+        danger: true,
+        ok: '재시작 및 시작'
+      });
+      if (!confirmRestart) return;
+    }
+  }
+  if (act === 'startall') {
+    const s1 = (state.serversStatus || []).find((s) => s.id === 'server1');
+    const s2 = (state.serversStatus || []).find((s) => s.id === 'server2');
+    const s1Single = s1 && (s1.state === 'running' || s1.state === 'starting') && s1.maxRam === '5500M';
+    const s2Single = s2 && (s2.state === 'running' || s2.state === 'starting') && s2.maxRam === '5500M';
+    if (s1Single || s2Single) {
+      const targetName = s1Single ? s1.name : s2.name;
+      const confirmRestart = await modal({
+        title: '전체 시작 (서버 재시작 필요)',
+        text: `${targetName}가 5.5GB로 실행 중입니다. 동시 가동을 위해 2.8GB로 재시작하시겠습니까?`,
+        danger: true,
+        ok: '재시작 및 전체 시작'
+      });
+      if (!confirmRestart) return;
+    }
+  }
+
   let p = act === 'startall' ? '/api/power/startall' : act === 'stopall' ? '/api/power/stopall' : `${SP()}/${act}`;
   if (['start', 'stop', 'restart'].includes(act)) p = `/api/server/${id}/${act}`;
   try { const r = await post(p); toast(r.message || (r.ok ? '완료' : '실패'), !r.ok); setTimeout(refreshDashboard, 700); }
@@ -598,7 +1036,7 @@ document.addEventListener('click', async (e) => {
 });
 
 /* ===== 네비게이션 ===== */
-const VIEWS = { dashboard: viewDashboard, console: viewConsole, log: viewLog, players: viewPlayers, software: viewSoftware, plugins: viewPlugins, files: viewFiles, world: viewWorld, backups: viewBackups, access: viewAccess };
+const VIEWS = { dashboard: viewDashboard, options: viewOptions, console: viewConsole, log: viewLog, players: viewPlayers, software: viewSoftware, plugins: viewPlugins, files: viewFiles, world: viewWorld, backups: viewBackups, access: viewAccess };
 const curName = () => (state.servers.find((s) => s.id === state.server) || {}).name || state.server;
 
 $('#tabsNav').addEventListener('click', (e) => { const b = e.target.closest('button[data-tab]'); if (b) setTab(b.dataset.tab); });
@@ -612,6 +1050,7 @@ $('#logout').onclick = async () => { await post('/api/logout'); location.href = 
     state.role = me.role;
     const st = await api('/api/status');
     state.servers = st.servers.map((s) => ({ id: s.id, name: s.name }));
+    state.serversStatus = st.servers;
     state.server = state.servers[0] ? state.servers[0].id : 'server1';
   } catch { /* 401 처리됨 */ }
   renderShell();

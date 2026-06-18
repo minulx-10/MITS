@@ -20,6 +20,7 @@ const software = require('./src/software');
 const worlds = require('./src/worlds');
 const backups = require('./src/backups');
 const playerdata = require('./src/playerdata');
+const properties = require('./src/properties');
 
 const upload = multer({ dest: os.tmpdir(), limits: { fileSize: 2 * 1024 * 1024 * 1024 } });
 
@@ -43,6 +44,24 @@ app.get('/api/me', (req, res) =>
   res.json({ authed: !!(req.session && req.session.authed), role: (req.session && req.session.role) || null })
 );
 app.get('/login.html', (req, res) => res.sendFile(path.join(__dirname, 'public', 'login.html')));
+
+// 바로가기용 자동 로그인 — ?token=비밀번호 로 접속하면 세션 생성 후 메인으로 리다이렉트
+app.get('/auto-login', (req, res) => {
+  const token = req.query.token || '';
+  const crypto = require('crypto');
+  const safe = (a, b) => { const ba = Buffer.from(String(a)), bb = Buffer.from(String(b)); if (ba.length !== bb.length) { crypto.timingSafeEqual(ba, ba); return false; } return crypto.timingSafeEqual(ba, bb); };
+  if (token && safe(token, config.password)) {
+    req.session.authed = true;
+    req.session.role = 'admin';
+    return res.redirect('/');
+  }
+  if (config.viewerPassword && token && safe(token, config.viewerPassword)) {
+    req.session.authed = true;
+    req.session.role = 'viewer';
+    return res.redirect('/');
+  }
+  return res.redirect('/login.html');
+});
 
 // ---- 이하 인증 필요 ----
 app.use(requireAuth);
@@ -73,6 +92,7 @@ app.get('/api/status', A(async () => {
 app.post('/api/server/:id/start', requireAdmin, A((req) => mc.startServer(req.params.id)));
 app.post('/api/server/:id/stop', requireAdmin, A((req) => mc.stopServer(req.params.id)));
 app.post('/api/server/:id/restart', requireAdmin, A((req) => mc.restartServer(req.params.id)));
+app.post('/api/server/:id/extport', requireAdmin, A((req) => mc.setExtPort(req.params.id, (req.body || {}).extPort)));
 app.post('/api/power/startall', requireAdmin, A(() => mc.startAll()));
 app.post('/api/power/stopall', requireAdmin, A(() => mc.stopAll()));
 
@@ -164,6 +184,10 @@ app.get('/api/server/:id/backups/download', A((req, res) => {
   const f = backups.resolveDownload(req.params.id, req.query.file);
   res.download(f);
 }));
+
+// ===== 설정 (server.properties) =====
+app.get('/api/server/:id/properties', A((req) => properties.readProperties(req.params.id)));
+app.post('/api/server/:id/properties', requireAdmin, A((req) => properties.writeProperties(req.params.id, req.body || {})));
 
 // 업로드 용량 초과 등 multer 에러 처리
 app.use((err, req, res, next) => {

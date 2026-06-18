@@ -18,6 +18,7 @@ const servers = [
     session: process.env.S1_SESSION || 'mc1',
     dir: process.env.S1_DIR || inHome('server1'),
     port: parseInt(process.env.S1_PORT || '25565', 10),
+    extPort: process.env.S1_EXT_PORT ? parseInt(process.env.S1_EXT_PORT, 10) : null,
   },
   {
     id: 'server2',
@@ -25,6 +26,7 @@ const servers = [
     session: process.env.S2_SESSION || 'mc2',
     dir: process.env.S2_DIR || inHome('server2'),
     port: parseInt(process.env.S2_PORT || '25566', 10),
+    extPort: process.env.S2_EXT_PORT ? parseInt(process.env.S2_EXT_PORT, 10) : null,
   },
 ];
 
