@@ -53,6 +53,16 @@ const config = {
   backupDir: process.env.BACKUP_DIR || inHome('mits-backups'),
   backupKeep: parseInt(process.env.BACKUP_KEEP || '10', 10),
   autoBackupHours: parseFloat(process.env.AUTO_BACKUP_HOURS || '0'),
+
+  // 영속 데이터(스케줄/매크로/메트릭/게임상태 캐시 등) — repo 밖에 둬서 배포(git reset)에 안 날아감
+  dataDir: process.env.DATA_DIR || inHome('mits-data'),
+
+  // 원격 접속(HTTPS 프록시: tailscale serve 등) 뒤에서만 켠다. http(로컬/SSH터널)에선 0 유지.
+  secureCookie: process.env.PANEL_SECURE_COOKIE === '1',
+
+  // 리소스 메트릭 수집
+  metricsIntervalSec: parseInt(process.env.METRICS_INTERVAL_SEC || '15', 10),
+  metricsRetainHours: parseFloat(process.env.METRICS_RETAIN_HOURS || '24'),
 };
 
 function getServer(id) {

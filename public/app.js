@@ -4,11 +4,13 @@
 const $ = (s, r = document) => r.querySelector(s);
 const state = { server: 'server1', tab: 'dashboard', role: null, servers: [] };
 let pollTimer = null;
+let consoleES = null;          // 콘솔 SSE 연결
+const cmdHist = { list: [], idx: -1 };  // 명령 히스토리(↑↓)
 
 const TABS = [
-  ['dashboard', '대시보드'], ['options', '설정'], ['console', '콘솔'], ['log', '로그'],
+  ['dashboard', '대시보드'], ['gamesettings', '게임설정'], ['options', '설정'], ['console', '콘솔'], ['log', '로그'],
   ['players', '플레이어'], ['software', '소프트웨어'], ['plugins', '플러그인'], ['files', '파일'],
-  ['world', '월드'], ['backups', '백업'], ['access', '액세스'],
+  ['world', '월드'], ['backups', '백업'], ['schedules', '예약'], ['macros', '매크로'], ['access', '액세스'],
 ];
 const STATE_LABEL = { running: '실행 중', stopped: '정지됨', starting: '시작 중', stopping: '종료 중', restarting: '재시작 중' };
 const admin = () => state.role === 'admin';
@@ -89,6 +91,7 @@ function renderShell() {
 function setTab(tab) {
   state.tab = tab;
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  if (consoleES) { consoleES.close(); consoleES = null; }
   renderShell();
   const fn = VIEWS[tab];
   if (fn) fn();
@@ -111,6 +114,10 @@ async function viewDashboard() {
         <li><b>모바일/Bedrock:</b> 주소 <code>ssh.gsmsv.site</code> · 포트 <code id="addrBedrock">&lt;외부포트&gt;</code></li>
         <li><b>이 패널:</b> <code>ssh -p 24160 -L 8080:127.0.0.1:3000 ubuntu@ssh.gsmsv.site</code></li>
       </ul>
+    </section>
+    <section class="info" id="metricsSec">
+      <h3>📈 리소스 추이 <span class="muted" style="font-size:12px;font-weight:500">(최근 3시간)</span></h3>
+      <div id="metricsBody" class="muted">불러오는 중…</div>
     </section>`;
   $('#copyAddr').onclick = () => {
     const text = $('#addrJava').textContent;
@@ -156,6 +163,30 @@ async function refreshDashboard() {
     $('#addrJava').textContent = `ssh.gsmsv.site:${extPort}`;
     $('#addrBedrock').textContent = String(extPort);
   }
+  loadMetrics();
+}
+async function loadMetrics() {
+  const el = $('#metricsBody'); if (!el) return;
+  let d; try { d = await api('/api/metrics?range=3h'); } catch { return; }
+  const pts = d.points || [];
+  if (pts.length < 2) { el.innerHTML = '<p class="muted">데이터 수집 중… 잠시 후 그래프가 표시됩니다.</p>'; return; }
+  const last = pts[pts.length - 1];
+  const ramUsed = pts.map((p) => (p.usedMB != null ? p.usedMB / 1024 : null));
+  const load = pts.map((p) => p.load);
+  const totalGiB = last.totalMB ? (last.totalMB / 1024).toFixed(1) : '?';
+  const lastRam = last.usedMB != null ? (last.usedMB / 1024).toFixed(1) : '—';
+  const lastLoad = load[load.length - 1] != null ? load[load.length - 1].toFixed(2) : '—';
+  const srvIds = [...new Set(pts.flatMap((p) => (p.servers || []).map((s) => s.id)))];
+  const srvCards = srvIds.map((id) => {
+    const series = pts.map((p) => { const s = (p.servers || []).find((x) => x.id === id); return s && s.rssMB != null ? s.rssMB / 1024 : null; });
+    const lastVal = [...series].reverse().find((v) => v != null);
+    const name = (state.servers.find((s) => s.id === id) || {}).name || id;
+    return `<div class="metric-card"><div class="metric-top"><span class="metric-name">${esc(name)} RAM</span><span class="metric-val">${lastVal != null ? lastVal.toFixed(2) + ' GiB' : '—'}</span></div>${sparkline(series, { color: '#6fdc8c' })}</div>`;
+  }).join('');
+  el.innerHTML = `<div class="metric-grid">
+    <div class="metric-card"><div class="metric-top"><span class="metric-name">시스템 RAM</span><span class="metric-val">${lastRam} / ${totalGiB} GiB</span></div>${sparkline(ramUsed, { color: '#e0a93a' })}</div>
+    <div class="metric-card"><div class="metric-top"><span class="metric-name">CPU Load (1m)</span><span class="metric-val">${lastLoad}</span></div>${sparkline(load, { color: '#6fdc8c' })}</div>
+    ${srvCards}</div>`;
 }
 function renderSysbar(sys) {
   if (!sys) return;
@@ -330,6 +361,15 @@ async function viewOptions() {
         <button class="start" id="savePropsBtn" ${admin() ? '' : 'disabled'}>설정 저장</button>
       </div>
     </div>
+  </section>
+  <section class="info">
+    <h3>고급: 전체 설정 편집 <button class="ghost small" id="propFullToggle">열기</button></h3>
+    <p class="muted">server.properties 전체 키를 편집합니다. 안전을 위해 <b>허용된 키만</b> 수정 가능합니다(나머지는 읽기 전용). 저장 후 서버를 재시작하면 반영됩니다.</p>
+    <div id="propFullWrap" style="display:none">
+      <input id="propFullFilter" class="fm-filter" placeholder="키 검색… (예: pvp, motd, view-distance)" style="margin-bottom:12px;min-width:240px">
+      <div id="propFullBody" class="muted">불러오는 중…</div>
+      <div style="margin-top:14px;display:flex;justify-content:flex-end"><button class="start" id="propFullSave" ${admin() ? '' : 'disabled'}>변경분 저장</button></div>
+    </div>
   </section>`;
 
   if (admin()) {
@@ -344,7 +384,47 @@ async function viewOptions() {
     $('#savePropsBtn').onclick = saveProperties;
   }
 
+  $('#propFullToggle').onclick = () => {
+    const w = $('#propFullWrap');
+    const show = w.style.display === 'none';
+    w.style.display = show ? 'block' : 'none';
+    $('#propFullToggle').textContent = show ? '닫기' : '열기';
+    if (show && !propFullState.order) loadPropsFull();
+  };
+  $('#propFullFilter').addEventListener('input', (e) => { propFullState.filter = e.target.value.toLowerCase(); renderPropsFull(); });
+  $('#propFullSave').onclick = savePropsFull;
+
   await loadProperties();
+}
+
+let propFullState = {};
+async function loadPropsFull() {
+  try {
+    const d = await api(`${SP()}/properties/full`);
+    propFullState = { props: d.props, order: d.order, allowed: new Set(d.allowed), filter: '' };
+    renderPropsFull();
+  } catch (e) { $('#propFullBody').textContent = e.message; }
+}
+function renderPropsFull() {
+  if (!propFullState.order) return;
+  const { props, order, allowed, filter } = propFullState;
+  const keys = order.filter((k) => !filter || k.toLowerCase().includes(filter));
+  $('#propFullBody').innerHTML = `<div class="props-full">${keys.map((k) => {
+    const ok = allowed.has(k);
+    return `<div class="prop-item-full"><span class="prop-label">${esc(k)}${ok ? '' : ' <span class="muted" style="font-size:11px;font-weight:500">(읽기전용)</span>'}</span>
+      <input type="text" data-pk="${esc(k)}" value="${esc(props[k])}" ${ok && admin() ? '' : 'disabled'}></div>`;
+  }).join('')}</div>` || '<p class="muted">표시할 키가 없습니다.</p>';
+}
+async function savePropsFull() {
+  const updates = {};
+  $('#propFullBody').querySelectorAll('input[data-pk]').forEach((inp) => {
+    const k = inp.dataset.pk;
+    if (!propFullState.allowed.has(k)) return;
+    if (inp.value !== String(propFullState.props[k])) updates[k] = inp.value;
+  });
+  if (!Object.keys(updates).length) return toast('변경된 항목이 없습니다.');
+  try { const r = await post(`${SP()}/properties/full`, { updates }); toast(r.message || '저장했습니다.'); loadPropsFull(); }
+  catch (e) { toast(e.message, true); }
 }
 
 function setToggleBtn(btn, isTrue) {
@@ -407,39 +487,52 @@ async function saveProperties() {
   }
 }
 
-/* ===== 탭: 콘솔 ===== */
+/* ===== 탭: 콘솔 (SSE 실시간 + 명령 히스토리) ===== */
 async function viewConsole() {
+  cmdHist.idx = -1;
   $('#view').innerHTML = `<section class="panel">
-    <div class="panel-head"><div class="panel-title">콘솔 — ${esc(curName())}</div>
-      <button class="ghost small" id="refreshC">새로고침</button></div>
-    <pre class="console" id="console">불러오는 중…</pre>
+    <div class="panel-head"><div class="panel-title">콘솔 — ${esc(curName())} <span class="muted" id="consoleStatus" style="font-size:12px;font-weight:600"></span></div>
+      <button class="ghost small" id="clearC">화면 지우기</button></div>
+    <pre class="console" id="console">연결 중…</pre>
     <form class="cmd" id="cmdForm"><span class="prompt">&gt;</span>
-      <input id="cmdInput" placeholder="명령 입력 (예: list, say 안녕, op 닉네임)" autocomplete="off" ${admin() ? '' : 'disabled'} />
+      <input id="cmdInput" placeholder="명령 입력 (↑↓ 히스토리, 예: list, say 안녕)" autocomplete="off" ${admin() ? '' : 'disabled'} />
       <button type="submit" ${admin() ? '' : 'disabled'}>전송</button></form></section>
     <section class="info"><h3>콘솔 도움말</h3><ul>
       <li><b>치트/관리자(OP):</b> <code>op 닉네임</code> 후 게임에서 <code>/gamemode creative</code> 등 사용</li>
       <li><b>차단 해제(Unban):</b> <code>pardon 닉네임</code> · IP는 <code>pardon-ip 1.2.3.4</code></li>
-      <li><b>게임모드 변경:</b> <code>gamemode survival 닉네임</code> (0=생존,1=창작,2=모험,3=관전)</li>
-      <li><b>플레이어 목록:</b> <code>list</code> · <b>시간/날씨:</b> <code>time set day</code>, <code>weather clear</code></li></ul></section>`;
-  $('#refreshC').onclick = loadConsole;
+      <li><b>실시간:</b> latest.log 를 실시간 스트리밍합니다(폴링 없음). 입력한 명령은 <code>&gt;</code> 로 표시됩니다.</li></ul></section>`;
+  const el = $('#console');
+  const append = (text, cls) => {
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    if (cls) { const sp = document.createElement('span'); sp.className = cls; sp.textContent = text; el.appendChild(sp); }
+    else el.appendChild(document.createTextNode(text));
+    if (atBottom) el.scrollTop = el.scrollHeight;
+  };
+  $('#clearC').onclick = () => { el.textContent = ''; };
+
+  // SSE 연결 (탭 전환 시 setTab 이 close)
+  const es = new EventSource(`${SP()}/console/stream`);
+  consoleES = es;
+  es.addEventListener('init', (ev) => { try { el.textContent = JSON.parse(ev.data).text || '(빈 콘솔)'; } catch { /* */ } el.scrollTop = el.scrollHeight; const st = $('#consoleStatus'); if (st) st.textContent = '● 실시간'; });
+  es.addEventListener('log', (ev) => { try { append(JSON.parse(ev.data).text); } catch { /* */ } });
+  es.onerror = () => { const st = $('#consoleStatus'); if (st) st.textContent = '○ 재연결 중…'; };
+
+  // 명령 히스토리 로드
+  try { const h = await api(`${SP()}/console/history`); cmdHist.list = (h.items || []).map((x) => x.command); } catch { cmdHist.list = []; }
+
+  const inp = $('#cmdInput');
   $('#cmdForm').onsubmit = async (e) => {
     e.preventDefault();
-    const inp = $('#cmdInput'); const command = inp.value.trim();
+    const command = inp.value.trim();
     if (!command) return;
-    try { const r = await post(`${SP()}/command`, { command }); if (r.ok) { inp.value = ''; setTimeout(loadConsole, 400); } else toast(r.message, true); }
+    append(`\n> ${command}\n`, 'cmd-echo');
+    try { const r = await post(`${SP()}/command`, { command }); if (r.ok) { cmdHist.list.push(command); cmdHist.idx = -1; inp.value = ''; } else toast(r.message, true); }
     catch (err) { toast(err.message, true); }
   };
-  await loadConsole();
-  pollTimer = setInterval(loadConsole, 2500);
-}
-async function loadConsole() {
-  try {
-    const d = await api(`${SP()}/console`);
-    const el = $('#console'); if (!el) return;
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-    el.textContent = d.text || '(빈 콘솔)';
-    if (atBottom) el.scrollTop = el.scrollHeight;
-  } catch { /* */ }
+  inp.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowUp') { e.preventDefault(); if (!cmdHist.list.length) return; cmdHist.idx = cmdHist.idx < 0 ? cmdHist.list.length - 1 : Math.max(0, cmdHist.idx - 1); inp.value = cmdHist.list[cmdHist.idx] || ''; }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); if (cmdHist.idx < 0) return; cmdHist.idx += 1; if (cmdHist.idx >= cmdHist.list.length) { cmdHist.idx = -1; inp.value = ''; } else inp.value = cmdHist.list[cmdHist.idx]; }
+  });
 }
 
 /* ===== 탭: 로그 ===== */
@@ -661,6 +754,16 @@ async function showPlayerDetail(uuid) {
           ${stat('경험치', d.xpLevel != null ? `Lv ${d.xpLevel} (총 ${d.xpTotal ?? '?'})` : '—')}
           ${stat('스폰 위치', spawn)}
         </div>
+        ${admin() ? `<div class="pd-actions">
+          <select data-pq="gamemode"><option value="">게임모드…</option><option value="0">생존</option><option value="1">창작</option><option value="2">모험</option><option value="3">관전</option></select>
+          <button class="ghost" data-pq="tp">텔레포트</button>
+          <button class="ghost" data-pq="give">아이템</button>
+          <button class="restart" data-pq="heal">회복</button>
+          <button class="restart" data-pq="feed">배부르게</button>
+          <button class="stop" data-pq="kill">처치</button>
+          <button class="stop" data-pq="kick">킥</button>
+          <button class="stop" data-pq="ban">차단</button>
+        </div>` : ''}
       </div>
     </div>
     <div class="pd-section">
@@ -671,6 +774,45 @@ async function showPlayerDetail(uuid) {
       <h4>📦 엔더 상자 (${d.ender.length} / 27 슬롯 사용)</h4>
       ${renderEnder(d.ender)}
     </div>`;
+
+  wirePlayerActions(d.name);
+}
+function wirePlayerActions(name) {
+  const root = $('#pdDetail');
+  root.querySelectorAll('[data-pq]').forEach((b) => {
+    const act = b.dataset.pq;
+    const call = async (value) => {
+      try { const r = await post(`${SP()}/players/${act}`, { value }); toast(r.message || (r.ok ? '완료' : '실패'), !r.ok); }
+      catch (e) { toast(e.message, true); }
+    };
+    if (act === 'gamemode') {
+      b.onchange = () => { if (b.value === '') return; call({ name, mode: b.value }); b.value = ''; };
+    } else {
+      b.onclick = async () => {
+        if (act === 'tp') {
+          const c = await modal({ title: '텔레포트', text: `${name} 이동 — 좌표 "x y z" 또는 대상 닉네임:`, input: true, placeholder: '예: 100 64 -200', ok: '이동' });
+          if (!c) return;
+          const p = c.trim().split(/\s+/);
+          if (p.length === 3) call({ name, x: p[0], y: p[1], z: p[2] }); else call({ name, target: p[0] });
+        } else if (act === 'give') {
+          const g = await modal({ title: '아이템 지급', text: `${name} 에게 — "아이템 [개수]":`, input: true, placeholder: '예: diamond 1', ok: '지급' });
+          if (!g) return;
+          const p = g.trim().split(/\s+/);
+          call({ name, item: p[0], count: p[1] || 1 });
+        } else if (act === 'ban') {
+          if (!(await modal({ title: '차단', text: `${name} 을(를) 차단할까요?`, danger: true, ok: '차단' }))) return;
+          call(name);
+        } else if (act === 'kick') {
+          call(name);
+        } else if (act === 'kill') {
+          if (!(await modal({ title: '처치', text: `${name} 을(를) 처치(kill)할까요?`, danger: true, ok: '처치' }))) return;
+          call({ name });
+        } else {
+          call({ name }); // heal / feed
+        }
+      };
+    }
+  });
 }
 async function onPlayerBtn(e) {
   const b = e.target.closest('button[data-pact]'); if (!b) return;
@@ -1035,8 +1177,174 @@ document.addEventListener('click', async (e) => {
   catch (err) { toast(err.message, true); }
 });
 
+/* ===== 탭: 게임 설정 (월드보더/난이도/시간/날씨/gamerule/PVP) ===== */
+async function viewGameSettings() {
+  $('#view').innerHTML = `<section class="info"><h3>게임 설정 — ${esc(curName())}</h3>
+    <p class="muted">월드보더·난이도·시간·날씨·gamerule·PVP를 콘솔 명령으로 적용합니다. <b>서버가 켜져 있어야</b> 즉시 반영됩니다(PVP는 재시작 필요).</p>
+    <div id="gsLoader" class="muted">불러오는 중…</div>
+    <div id="gsBody" style="display:none"></div>
+  </section>`;
+  await loadGameSettings();
+}
+async function loadGameSettings() {
+  let d;
+  try { d = await api(`${SP()}/gamesettings`); } catch (e) { $('#gsLoader').textContent = e.message; return; }
+  const s = d.settings || {};
+  const wb = s.worldborder || {};
+  const dis = admin() ? '' : 'disabled';
+  const curDiff = ['peaceful', 'easy', 'normal', 'hard'][s.difficulty] || '?';
+  const grEntries = Object.entries(s.gamerules || {});
+  $('#gsBody').innerHTML = `
+    <div class="gs-grid">
+      <div class="gs-card"><div class="gs-h">🗺️ 월드보더</div>
+        <div class="gs-row"><label>크기(블록)</label><input type="number" id="wbSize" value="${wb.size != null ? Math.round(wb.size) : 3000}" min="1" ${dis}><button class="start small" data-gs="wb-size" ${dis}>적용</button></div>
+        <div class="gs-row"><label>중심 X / Z</label><input type="number" id="wbX" value="${wb.centerX != null ? Math.round(wb.centerX) : 0}" ${dis}><input type="number" id="wbZ" value="${wb.centerZ != null ? Math.round(wb.centerZ) : 0}" ${dis}><button class="start small" data-gs="wb-center" ${dis}>적용</button></div>
+        <div class="gs-row"><label>경고 거리</label><input type="number" id="wbWarn" value="${wb.warningBlocks != null ? Math.round(wb.warningBlocks) : 5}" min="0" ${dis}><button class="start small" data-gs="wb-warn" ${dis}>적용</button></div>
+        <p class="muted" style="margin:6px 0 0">현재: ${wb.size != null ? Math.round(wb.size) + '블록' : '미설정'} · 중심 (${Math.round(wb.centerX || 0)}, ${Math.round(wb.centerZ || 0)}) ${s.source === 'level.dat' ? '' : '<span class="off">(level.dat 못읽음 — 캐시값)</span>'}</p>
+      </div>
+      <div class="gs-card"><div class="gs-h">⚔️ 난이도 · PVP</div>
+        <div class="gs-row"><label>난이도</label>
+          <select id="gsDiff" ${dis}>${['peaceful:평화로움', 'easy:쉬움', 'normal:보통', 'hard:어려움'].map((o) => { const [v, t] = o.split(':'); return `<option value="${v}" ${curDiff === v ? 'selected' : ''}>${t}</option>`; }).join('')}</select>
+          <button class="start small" data-gs="diff" ${dis}>적용</button></div>
+        <div class="gs-row"><label>PVP</label>
+          <button class="toggle-btn true" id="gsPvpOn" data-gs="pvp" data-v="true" ${dis}>ON</button>
+          <button class="toggle-btn false" data-gs="pvp" data-v="false" ${dis}>OFF</button>
+          <span class="muted">재시작 필요</span></div>
+      </div>
+      <div class="gs-card"><div class="gs-h">🕒 시간 · 날씨</div>
+        <div class="gs-row"><label>시간</label>${['day:낮', 'noon:정오', 'night:밤', 'midnight:자정'].map((o) => { const [v, t] = o.split(':'); return `<button class="ghost small" data-gs="time" data-v="${v}" ${dis}>${t}</button>`; }).join('')}</div>
+        <div class="gs-row"><label>날씨</label>${['clear:맑음', 'rain:비', 'thunder:천둥'].map((o) => { const [v, t] = o.split(':'); return `<button class="ghost small" data-gs="weather" data-v="${v}" ${dis}>${t}</button>`; }).join('')}</div>
+      </div>
+      <div class="gs-card"><div class="gs-h">🎲 게임룰</div>
+        <div class="gs-row"><select id="grKey" ${dis}>${(d.gameruleKeys || []).map((k) => `<option>${k}</option>`).join('')}</select>
+          <input id="grVal" placeholder="true / false / 숫자" style="max-width:130px" ${dis}><button class="start small" data-gs="gamerule" ${dis}>적용</button></div>
+        <div class="gr-list">${grEntries.length ? grEntries.map(([k, v]) => `<span class="gr-chip">${esc(k)}=<b>${esc(v)}</b></span>`).join('') : '<span class="muted">level.dat에서 읽은 게임룰이 없습니다.</span>'}</div>
+      </div>
+    </div>`;
+  if (admin()) $('#gsBody').addEventListener('click', onGameSettingBtn);
+  $('#gsLoader').style.display = 'none';
+  $('#gsBody').style.display = 'block';
+}
+async function gsApply(body) {
+  try { const r = await post(`${SP()}/gamesettings`, body); toast(r.message || '적용했습니다.'); setTimeout(loadGameSettings, 500); }
+  catch (e) { toast(e.message, true); }
+}
+async function onGameSettingBtn(e) {
+  const b = e.target.closest('[data-gs]'); if (!b) return;
+  const k = b.dataset.gs;
+  if (k === 'wb-size') return gsApply({ type: 'worldborder', op: 'set', size: $('#wbSize').value });
+  if (k === 'wb-center') return gsApply({ type: 'worldborder', op: 'center', x: $('#wbX').value, z: $('#wbZ').value });
+  if (k === 'wb-warn') return gsApply({ type: 'worldborder', op: 'warning-distance', value: $('#wbWarn').value });
+  if (k === 'diff') return gsApply({ type: 'difficulty', value: $('#gsDiff').value });
+  if (k === 'pvp') return gsApply({ type: 'pvp', value: b.dataset.v });
+  if (k === 'time') return gsApply({ type: 'time', value: b.dataset.v });
+  if (k === 'weather') return gsApply({ type: 'weather', value: b.dataset.v });
+  if (k === 'gamerule') { const val = $('#grVal').value.trim(); if (!val) return toast('값을 입력하세요.', true); return gsApply({ type: 'gamerule', rule: $('#grKey').value, value: val }); }
+}
+
+/* ===== 탭: 예약 작업 ===== */
+async function viewSchedules() {
+  $('#view').innerHTML = `<section class="info"><h3>예약 작업</h3>
+    <p class="muted">자동 재시작 · 정기 공지(say) · 명령 · 백업을 시각/주기에 맞춰 실행합니다. 30초 단위로 점검합니다.</p>
+    ${admin() ? `<div class="sch-form">
+      <select id="schServer">${state.servers.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>
+      <select id="schType"><option value="restart">재시작</option><option value="say">공지(say)</option><option value="command">명령</option><option value="backup">백업</option></select>
+      <input id="schPayload" placeholder="공지/명령 내용" style="flex:1;min-width:160px">
+      <select id="schKind"><option value="daily">매일</option><option value="interval">주기(분)</option></select>
+      <input id="schWhen" placeholder="03:00" style="max-width:90px">
+      <button class="start small" id="schAdd">추가</button>
+    </div>` : ''}
+    <div id="schList" class="muted" style="margin-top:12px">불러오는 중…</div></section>`;
+  if (admin()) {
+    $('#schAdd').onclick = addSchedule;
+    $('#schKind').onchange = () => { $('#schWhen').placeholder = $('#schKind').value === 'daily' ? '03:00' : '예: 120'; };
+  }
+  await loadSchedules();
+}
+async function addSchedule() {
+  const kind = $('#schKind').value;
+  const when = $('#schWhen').value.trim();
+  const body = {
+    serverId: $('#schServer').value,
+    type: $('#schType').value,
+    payload: $('#schPayload').value,
+    schedule: kind === 'daily' ? { kind: 'daily', at: when } : { kind: 'interval', everyMin: parseInt(when, 10) },
+  };
+  try { await post('/api/schedules', body); toast('예약을 추가했습니다.'); $('#schPayload').value = ''; $('#schWhen').value = ''; loadSchedules(); }
+  catch (e) { toast(e.message, true); }
+}
+async function loadSchedules() {
+  let d; try { d = await api('/api/schedules'); } catch (e) { $('#schList').textContent = e.message; return; }
+  if (!d.items.length) { $('#schList').innerHTML = '<p class="muted">예약된 작업이 없습니다.</p>'; return; }
+  const TYPE = { restart: '🔄 재시작', say: '📢 공지', command: '⌨️ 명령', backup: '💾 백업' };
+  const srvName = (id) => (state.servers.find((s) => s.id === id) || {}).name || id;
+  $('#schList').innerHTML = `<table class="tbl"><thead><tr><th>서버</th><th>작업</th><th>내용</th><th>주기</th><th>상태</th><th></th></tr></thead><tbody>${
+    d.items.map((t) => `<tr style="${t.enabled ? '' : 'opacity:.5'}">
+      <td>${esc(srvName(t.serverId))}</td><td>${TYPE[t.type] || t.type}</td>
+      <td>${esc(t.payload || '—')}</td>
+      <td>${t.schedule.kind === 'daily' ? '매일 ' + esc(t.schedule.at) : esc(t.schedule.everyMin) + '분마다'}</td>
+      <td>${t.enabled ? '<span class="ok">활성</span>' : '<span class="off">중지</span>'}</td>
+      <td class="row-act">${admin() ? `<button class="ghost xs" data-sch-toggle="${t.id}">${t.enabled ? '중지' : '활성'}</button><button class="link-del" data-sch-del="${t.id}">삭제</button>` : ''}</td></tr>`).join('')
+  }</tbody></table>`;
+  $('#schList').querySelectorAll('[data-sch-toggle]').forEach((b) => b.onclick = async () => { try { await post(`/api/schedules/${b.dataset.schToggle}/toggle`); loadSchedules(); } catch (e) { toast(e.message, true); } });
+  $('#schList').querySelectorAll('[data-sch-del]').forEach((b) => b.onclick = async () => { if (!(await modal({ title: '예약 삭제', text: '이 예약을 삭제할까요?', danger: true, ok: '삭제' }))) return; try { await post(`/api/schedules/${b.dataset.schDel}/delete`); loadSchedules(); } catch (e) { toast(e.message, true); } });
+}
+
+/* ===== 탭: 매크로 ===== */
+async function viewMacros() {
+  $('#view').innerHTML = `<section class="info"><h3>명령어 매크로 — 실행 대상: ${esc(curName())}</h3>
+    <p class="muted">자주 쓰는 명령을 저장하고 원클릭 실행합니다. <code>{player}</code> 토큰은 실행 시 닉네임으로 치환됩니다.</p>
+    ${admin() ? `<div class="macro-form">
+      <input id="mcIcon" placeholder="⚡" style="max-width:60px" maxlength="4">
+      <input id="mcLabel" placeholder="이름 (예: 낮으로)" style="max-width:160px">
+      <input id="mcCmd" placeholder="명령 (예: time set day, give {player} diamond 1)" style="flex:1;min-width:200px">
+      <button class="start small" id="mcAdd">추가</button>
+    </div>` : ''}
+    <div id="mcList" class="muted" style="margin-top:12px">불러오는 중…</div></section>`;
+  if (admin()) $('#mcAdd').onclick = addMacro;
+  await loadMacros();
+}
+async function addMacro() {
+  const body = { icon: $('#mcIcon').value, label: $('#mcLabel').value, command: $('#mcCmd').value };
+  try { await post('/api/macros', body); toast('매크로를 추가했습니다.'); $('#mcLabel').value = ''; $('#mcCmd').value = ''; $('#mcIcon').value = ''; loadMacros(); }
+  catch (e) { toast(e.message, true); }
+}
+async function loadMacros() {
+  let d; try { d = await api('/api/macros'); } catch (e) { $('#mcList').textContent = e.message; return; }
+  if (!d.items.length) { $('#mcList').innerHTML = '<p class="muted">저장된 매크로가 없습니다.</p>'; return; }
+  $('#mcList').innerHTML = `<div class="macro-grid">${d.items.map((m) => `<div class="macro-card">
+    <button class="macro-run" data-mc-run="${m.id}" title="${esc(m.command)}"><span class="macro-ico">${esc(m.icon || '⚡')}</span><span class="macro-label">${esc(m.label)}</span></button>
+    <code class="macro-cmd">${esc(m.command)}</code>
+    ${admin() ? `<button class="link-del" data-mc-del="${m.id}">삭제</button>` : ''}</div>`).join('')}</div>`;
+  $('#mcList').querySelectorAll('[data-mc-run]').forEach((b) => b.onclick = () => runMacro(b.dataset.mcRun, b.closest('.macro-card').querySelector('.macro-cmd').textContent));
+  $('#mcList').querySelectorAll('[data-mc-del]').forEach((b) => b.onclick = async () => { if (!(await modal({ title: '매크로 삭제', text: '삭제할까요?', danger: true, ok: '삭제' }))) return; try { await post(`/api/macros/${b.dataset.mcDel}/delete`); loadMacros(); } catch (e) { toast(e.message, true); } });
+}
+async function runMacro(id, cmd) {
+  let player;
+  if (cmd && cmd.includes('{player}')) {
+    player = await modal({ title: '플레이어 지정', text: `이 매크로는 {player}가 필요합니다.`, input: true, placeholder: '닉네임', ok: '실행' });
+    if (player === null) return;
+  }
+  try { const r = await post(`${SP()}/macros/${id}/run`, { player }); toast(r.message || '실행했습니다.'); }
+  catch (e) { toast(e.message, true); }
+}
+
+/* ===== 미니 스파크라인(의존성 없는 인라인 SVG) ===== */
+function sparkline(values, { w = 240, h = 40, color = 'var(--green-b)' } = {}) {
+  const nums = values.filter((v) => v != null);
+  if (nums.length < 2) return `<svg class="spark" width="${w}" height="${h}"></svg>`;
+  const min = Math.min(...nums), max = Math.max(...nums), span = max - min || 1;
+  const pts = values.map((v, i) => {
+    const x = (i / (values.length - 1)) * w;
+    const y = v == null ? h : h - ((v - min) / span) * (h - 4) - 2;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" width="100%" height="${h}">
+    <polyline fill="none" stroke="${color}" stroke-width="1.6" points="${pts}" /></svg>`;
+}
+
 /* ===== 네비게이션 ===== */
-const VIEWS = { dashboard: viewDashboard, options: viewOptions, console: viewConsole, log: viewLog, players: viewPlayers, software: viewSoftware, plugins: viewPlugins, files: viewFiles, world: viewWorld, backups: viewBackups, access: viewAccess };
+const VIEWS = { dashboard: viewDashboard, gamesettings: viewGameSettings, options: viewOptions, console: viewConsole, log: viewLog, players: viewPlayers, software: viewSoftware, plugins: viewPlugins, files: viewFiles, world: viewWorld, backups: viewBackups, schedules: viewSchedules, macros: viewMacros, access: viewAccess };
 const curName = () => (state.servers.find((s) => s.id === state.server) || {}).name || state.server;
 
 $('#tabsNav').addEventListener('click', (e) => { const b = e.target.closest('button[data-tab]'); if (b) setTab(b.dataset.tab); });
