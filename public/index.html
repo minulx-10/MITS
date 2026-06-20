@@ -2,9 +2,19 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>MITS · 대시보드</title>
+  <meta name="description" content="MITS — Minecraft(PaperMC) 서버 관리 패널" />
+  <meta name="theme-color" content="#0c1410" />
   <link rel="stylesheet" href="/style.css" />
+  <!-- PWA: 홈 화면 추가(앱처럼) -->
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/icons/icon.svg" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="MITS" />
 </head>
 <body>
   <header class="topbar">
@@ -40,5 +50,11 @@
   </div>
 
   <script src="/app.js"></script>
+  <script>
+    // PWA 서비스워커 — HTTPS(tailscale serve) 또는 localhost 에서만 등록됨(그 외엔 조용히 실패)
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+    }
+  </script>
 </body>
 </html>

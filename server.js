@@ -21,11 +21,19 @@ const worlds = require('./src/worlds');
 const backups = require('./src/backups');
 const playerdata = require('./src/playerdata');
 const properties = require('./src/properties');
+const gamesettings = require('./src/gamesettings');
+const scheduler = require('./src/scheduler');
+const macros = require('./src/macros');
+const metrics = require('./src/metrics');
+const consoleStream = require('./src/console-stream');
+const store = require('./src/store');
 
 const upload = multer({ dest: os.tmpdir(), limits: { fileSize: 2 * 1024 * 1024 * 1024 } });
 
 const app = express();
 app.disable('x-powered-by');
+// 원격 접속(HTTPS 프록시: tailscale serve 등) 뒤에서만 secure 쿠키/프록시 신뢰를 켠다.
+if (config.secureCookie) app.set('trust proxy', 1);
 app.use(express.json({ limit: '4mb' }));
 app.use(
   session({
@@ -33,20 +41,51 @@ app.use(
     secret: config.sessionSecret,
     resave: false,
     saveUninitialized: false,
-    cookie: { httpOnly: true, sameSite: 'lax', maxAge: 1000 * 60 * 60 * 8 },
+    cookie: { httpOnly: true, sameSite: 'lax', secure: config.secureCookie, maxAge: 1000 * 60 * 60 * 8 },
   })
 );
 
+// 로그인 무차별 대입 방지 — IP당 15분 윈도우 제한(메모리, 의존성 없음)
+function rateLimiter({ windowMs, max }) {
+  const hits = new Map();
+  return (req, res, next) => {
+    const now = Date.now();
+    const ip = req.ip || (req.connection && req.connection.remoteAddress) || 'unknown';
+    let e = hits.get(ip);
+    if (!e || now > e.resetAt) { e = { count: 0, resetAt: now + windowMs }; hits.set(ip, e); }
+    e.count += 1;
+    if (e.count > max) return res.status(429).json({ ok: false, error: '시도가 너무 많습니다. 잠시 후 다시 시도하세요.' });
+    next();
+  };
+}
+const loginLimiter = rateLimiter({ windowMs: 15 * 60 * 1000, max: 30 });
+
+// 콘솔 명령 히스토리 기록(최근 100개)
+async function recordHistory(id, command) {
+  try {
+    const key = `${id}-cmdhistory.json`;
+    const hist = await store.readJson(key, []);
+    hist.push({ t: Date.now(), command });
+    while (hist.length > 100) hist.shift();
+    await store.writeJson(key, hist);
+  } catch { /* 무시 */ }
+}
+
 // ---- 인증 불필요 ----
-app.post('/api/login', login);
+app.post('/api/login', loginLimiter, login);
 app.post('/api/logout', logout);
 app.get('/api/me', (req, res) =>
   res.json({ authed: !!(req.session && req.session.authed), role: (req.session && req.session.role) || null })
 );
 app.get('/login.html', (req, res) => res.sendFile(path.join(__dirname, 'public', 'login.html')));
 
+// PWA 정적 자산(매니페스트/서비스워커/아이콘) — 인증 불필요(민감정보 아님)
+app.get('/sw.js', (req, res) => res.sendFile(path.join(__dirname, 'public', 'sw.js')));
+app.get('/manifest.webmanifest', (req, res) => res.sendFile(path.join(__dirname, 'public', 'manifest.webmanifest')));
+app.use('/icons', express.static(path.join(__dirname, 'public', 'icons')));
+
 // 바로가기용 자동 로그인 — ?token=비밀번호 로 접속하면 세션 생성 후 메인으로 리다이렉트
-app.get('/auto-login', (req, res) => {
+app.get('/auto-login', loginLimiter, (req, res) => {
   const token = req.query.token || '';
   const crypto = require('crypto');
   const safe = (a, b) => { const ba = Buffer.from(String(a)), bb = Buffer.from(String(b)); if (ba.length !== bb.length) { crypto.timingSafeEqual(ba, ba); return false; } return crypto.timingSafeEqual(ba, bb); };
@@ -98,7 +137,17 @@ app.post('/api/power/stopall', requireAdmin, A(() => mc.stopAll()));
 
 // ===== 콘솔 =====
 app.get('/api/server/:id/console', A((req) => mc.getConsole(req.params.id).then((r) => ({ ok: true, ...r }))));
-app.post('/api/server/:id/command', requireAdmin, A((req) => mc.sendCommand(req.params.id, (req.body || {}).command)));
+// 실시간 콘솔(SSE) — latest.log tail. A() 래퍼 대신 직접 응답 유지.
+app.get('/api/server/:id/console/stream', (req, res) => {
+  consoleStream.addClient(req.params.id, res).catch(() => { try { res.status(400).end(); } catch { /* */ } });
+});
+app.get('/api/server/:id/console/history', A((req) => store.readJson(`${req.params.id}-cmdhistory.json`, []).then((items) => ({ ok: true, items }))));
+app.post('/api/server/:id/command', requireAdmin, A(async (req) => {
+  const command = (req.body || {}).command;
+  const r = await mc.sendCommand(req.params.id, command);
+  if (r && r.ok) recordHistory(req.params.id, command);
+  return r;
+}));
 
 // ===== 로그 =====
 app.get('/api/server/:id/logs', A((req) => logs.tail(req.params.id)));
@@ -188,6 +237,31 @@ app.get('/api/server/:id/backups/download', A((req, res) => {
 // ===== 설정 (server.properties) =====
 app.get('/api/server/:id/properties', A((req) => properties.readProperties(req.params.id)));
 app.post('/api/server/:id/properties', requireAdmin, A((req) => properties.writeProperties(req.params.id, req.body || {})));
+// 전체 키 편집기
+app.get('/api/server/:id/properties/full', A((req) => properties.readPropertiesFull(req.params.id)));
+app.post('/api/server/:id/properties/full', requireAdmin, A((req) => properties.writePropertiesFull(req.params.id, (req.body || {}).updates || {})));
+
+// ===== 게임 설정 (월드보더/난이도/시간/날씨/gamerule/PVP) =====
+app.get('/api/server/:id/gamesettings', A((req) => gamesettings.get(req.params.id)));
+app.post('/api/server/:id/gamesettings', requireAdmin, A((req) => gamesettings.apply(req.params.id, req.body || {})));
+
+// ===== 예약 작업 =====
+app.get('/api/schedules', A(() => scheduler.list()));
+app.post('/api/schedules', requireAdmin, A((req) => scheduler.create(req.body || {})));
+app.post('/api/schedules/:sid/toggle', requireAdmin, A((req) => scheduler.toggle(req.params.sid)));
+app.post('/api/schedules/:sid/delete', requireAdmin, A((req) => scheduler.remove(req.params.sid)));
+
+// ===== 명령어 매크로 =====
+app.get('/api/macros', A(() => macros.list()));
+app.post('/api/macros', requireAdmin, A((req) => macros.create(req.body || {})));
+app.post('/api/macros/:mid/delete', requireAdmin, A((req) => macros.remove(req.params.mid)));
+app.post('/api/server/:id/macros/:mid/run', requireAdmin, A((req) => macros.run(req.params.id, req.params.mid, (req.body || {}).player)));
+
+// ===== 리소스 메트릭(시계열) =====
+app.get('/api/metrics', A((req) => {
+  const RANGE = { '1h': 3600e3, '3h': 3 * 3600e3, '6h': 6 * 3600e3, '12h': 12 * 3600e3, '24h': 24 * 3600e3 };
+  return metrics.query(RANGE[req.query.range] || RANGE['3h']);
+}));
 
 // 업로드 용량 초과 등 multer 에러 처리
 app.use((err, req, res, next) => {
@@ -199,6 +273,8 @@ app.listen(config.port, config.host, () => {
   console.log(`[MITS] listening on http://${config.host}:${config.port}`);
   console.log(`[MITS] servers: ${config.servers.map((s) => `${s.id}(${s.session}:${s.port})`).join(', ')}`);
   startAutoBackup();
+  scheduler.start();
+  metrics.start().catch((e) => console.error('[MITS] 메트릭 시작 실패:', e.message));
 });
 
 // ===== 자동 백업 (선택) =====

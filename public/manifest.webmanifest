@@ -1,0 +1,16 @@
+{
+  "name": "MITS — Minecraft 서버 관리 패널",
+  "short_name": "MITS",
+  "description": "PaperMC 서버를 폰에서 관리하는 패널",
+  "lang": "ko",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0c1410",
+  "theme_color": "#0c1410",
+  "icons": [
+    { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

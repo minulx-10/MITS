@@ -412,7 +412,8 @@ async function setExtPort(id, extPort) {
 async function sendCommand(id, command) {
   const s = getServer(id);
   if (!s) throw new Error('알 수 없는 서버: ' + id);
-  const cmd = (command || '').trim();
+  // 줄바꿈 제거 — tmux send-keys 로의 다중명령 주입 차단(모든 명령 기능의 공통 관문)
+  const cmd = (command || '').replace(/[\r\n]+/g, ' ').trim();
   if (!cmd) return { ok: false, message: '빈 명령입니다.' };
   if (!(await isJavaRunning(s.dir))) {
     return { ok: false, message: `${s.name}: 서버가 실행 중이 아닙니다.` };

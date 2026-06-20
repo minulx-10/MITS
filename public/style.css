@@ -372,3 +372,111 @@ th.sortable:hover { color: var(--green-b); }
 .props-full { margin-top: 20px; display: flex; flex-direction: column; gap: 16px; }
 .prop-item-full { background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; display: flex; flex-direction: column; gap: 6px; }
 .prop-item-full input[type="text"] { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; font-size: 13px; outline: none; width: 100%; box-sizing: border-box; }
+
+/* ===================================================================== */
+/* 반응형 + 모바일 (리뉴얼)                                               */
+/* ===================================================================== */
+
+/* 태블릿 이하: 카드 1열, 여백 축소 */
+@media (max-width: 960px) {
+  .wrap { padding: 16px; }
+  .serverbar, .tabs-nav { padding-left: 16px; padding-right: 16px; }
+  .cards { grid-template-columns: 1fr; }
+  .props-grid { grid-template-columns: 1fr; }
+}
+
+/* 모바일 */
+@media (max-width: 640px) {
+  .topbar { padding: 10px 14px; gap: 10px; flex-wrap: wrap; }
+  .brand { font-size: 17px; }
+  .brand-sub { display: none; }
+  .sysbar { display: none; }
+  .serverbar { padding: 10px 14px 0; }
+
+  /* 하단 고정 네비를 위한 본문 여백 */
+  .wrap { padding: 12px 12px 84px; }
+
+  /* 탭 네비 → 화면 하단 고정 가로 스크롤 바(앱처럼) */
+  .tabs-nav {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 15;
+    margin: 0; max-width: none; width: auto;
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px));
+    background: rgba(8, 14, 11, .94); backdrop-filter: blur(10px);
+    border-top: 1px solid var(--border); border-bottom: 0;
+    display: flex; flex-wrap: nowrap; gap: 2px; overflow-x: auto;
+    -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  }
+  .tabs-nav::-webkit-scrollbar { display: none; }
+  .tab-btn { flex: 0 0 auto; white-space: nowrap; border-bottom: 0; border-radius: 9px; padding: 9px 13px; }
+  .tab-btn.active { background: var(--panel2); border-bottom: 0; }
+
+  /* 표는 가로 스크롤(셀이 줄바꿈으로 깨지지 않게) */
+  .tbl { display: block; overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; }
+
+  /* 콘솔 / 에디터 풀하이트 */
+  .console { height: 56vh; }
+  .editor { height: 56vh; }
+  .fm-body { max-height: 60vh; }
+
+  /* 플레이어 인벤토리 그리드: 화면 폭에 맞춤 */
+  .pd-detail { padding: 14px; }
+  .mc-grid { grid-template-columns: repeat(9, 1fr); width: 100%; }
+  .mc-slot { width: 100%; height: auto; aspect-ratio: 1 / 1; }
+
+  /* 모달/토스트가 하단 네비를 피하도록 */
+  .modal { width: min(94vw, 420px); }
+  .toast { bottom: calc(72px + env(safe-area-inset-bottom, 0px)); max-width: 92vw; }
+}
+
+/* 데스크톱에서도 콘솔이 너무 짧지 않게(기존 360px 보다 여유) */
+@media (min-width: 641px) {
+  .console { height: min(60vh, 520px); }
+}
+
+/* ===================================================================== */
+/* 신기능 컴포넌트 (게임설정/예약/매크로/콘솔/메트릭)                      */
+/* ===================================================================== */
+
+/* 게임 설정 */
+.gs-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 14px; }
+.gs-card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; }
+.gs-h { font-weight: 700; font-size: 15px; margin-bottom: 12px; }
+.gs-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.gs-row:last-child { margin-bottom: 0; }
+.gs-row label { font-size: 13px; color: var(--muted); min-width: 72px; }
+.gs-row input, .gs-row select { width: 110px; padding: 8px 10px; border-radius: 8px; background: var(--panel2); border: 1px solid var(--border); color: var(--text); outline: none; }
+.gs-row select { width: auto; }
+.gs-row input:focus, .gs-row select:focus { border-color: var(--green-b); }
+.gr-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.gr-chip { background: var(--panel2); border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px; font-size: 12px; font-family: ui-monospace, monospace; }
+.gs-row .toggle-btn { width: auto; height: auto; padding: 7px 14px; border-radius: 8px; font-size: 13px; }
+
+/* 예약 / 매크로 폼 */
+.sch-form, .macro-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 14px; }
+.sch-form input, .sch-form select, .macro-form input { padding: 9px 12px; border-radius: 8px; background: var(--panel2); border: 1px solid var(--border); color: var(--text); outline: none; }
+.sch-form input:focus, .sch-form select:focus, .macro-form input:focus { border-color: var(--green-b); }
+
+/* 매크로 카드 */
+.macro-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-top: 14px; }
+.macro-card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.macro-run { display: flex; align-items: center; gap: 10px; background: var(--panel2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; cursor: pointer; color: var(--text); text-align: left; }
+.macro-run:hover { border-color: var(--green-b); }
+.macro-ico { font-size: 20px; }
+.macro-label { font-weight: 700; font-size: 14px; }
+.macro-cmd { font-size: 11px; color: var(--muted); font-family: ui-monospace, monospace; word-break: break-all; }
+
+/* 콘솔 입력 에코 */
+.cmd-echo { color: var(--green-b); font-weight: 700; }
+
+/* 스파크라인 / 메트릭 */
+.spark { display: block; width: 100%; }
+.metric-card { background: var(--panel2); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
+.metric-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+.metric-name { font-size: 12px; color: var(--muted); font-weight: 600; }
+.metric-val { font-size: 14px; font-weight: 700; }
+.metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+
+/* 플레이어 빠른 액션 툴바 */
+.pd-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.pd-actions button, .pd-actions select { font-size: 12px; padding: 6px 11px; border-radius: 8px; font-weight: 700; }
+.pd-actions select { background: var(--panel2); border: 1px solid var(--border); color: var(--text); }
