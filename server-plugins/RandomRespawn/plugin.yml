@@ -1,0 +1,6 @@
+name: RandomRespawn
+version: '1.0'
+main: site.mits.randomrespawn.RandomRespawn
+api-version: '1.21'
+author: MITS
+description: 침대/앵커가 없으면 월드보더 내 안전한 랜덤 위치로 매번 새로 리스폰

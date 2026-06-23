@@ -1,0 +1,5 @@
+# RandomRespawn 설정
+# 월드보더 가장자리에서 안쪽으로 띄울 여유(블록)
+border-margin: 100
+# 안전한 지상을 찾기 위한 최대 시도 횟수(높을수록 안정적, 약간 더 무거움)
+safe-attempts: 24
