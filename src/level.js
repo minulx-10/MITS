@@ -34,13 +34,21 @@ async function readLevelDat(id) {
   const d = nbt.simplify(parsed);
   const data = d.Data || d;
 
-  // GameRules 는 문자열 값("true"/"10")으로 저장됨
+  // GameRules 는 문자열 값("true"/"10")으로 저장됨 (구버전). 신버전 26.x level.dat 엔 없을 수 있음 → 캐시로 보완.
   const gamerules = {};
   for (const [k, v] of Object.entries(data.GameRules || {})) gamerules[k] = String(v);
 
+  // 난이도: 구버전 Data.Difficulty(바이트) 또는 신버전 Data.difficulty_settings.difficulty(문자열) 모두 지원
+  const DIFF_NUM = { peaceful: 0, easy: 1, normal: 2, hard: 3 };
+  let difficulty = num(data.Difficulty);
+  const ds = data.difficulty_settings;
+  if (difficulty == null && ds && typeof ds.difficulty === 'string') difficulty = DIFF_NUM[ds.difficulty];
+  const hardcore = ds && (ds.hardcore === 1 || ds.hardcore === true) ? true : (data.hardcore === 1 || data.hardcore === true ? true : null);
+
   return {
     levelName: data.LevelName || world,
-    difficulty: num(data.Difficulty),
+    difficulty,
+    hardcore,
     dayTime: num(data.DayTime),
     raining: data.raining === 1 || data.raining === true || null,
     thundering: data.thundering === 1 || data.thundering === true || null,
