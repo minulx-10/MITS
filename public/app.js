@@ -108,11 +108,11 @@ async function viewDashboard() {
         <button class="ghost small" id="copyAddr">주소 복사</button>
         ${admin() ? '<button class="ghost small" id="editPort" style="margin-left: 6px">외부 포트 설정</button>' : ''}
       </h3>
-      <p class="muted">GSMSV는 재시작마다 외부 포트가 바뀔 수 있습니다. 외부 포트를 설정하면 아래 접속 정보에 바로 반영됩니다.</p>
+      <p class="muted">서버 구성에 따라 외부 포트가 바뀔 수 있습니다. 외부 포트를 설정하면 아래 접속 정보에 바로 반영됩니다.</p>
       <ul>
-        <li><b>PC(Java):</b> <code id="addrJava">ssh.gsmsv.site:&lt;외부포트&gt;</code></li>
-        <li><b>모바일/Bedrock:</b> 주소 <code>ssh.gsmsv.site</code> · 포트 <code id="addrBedrock">&lt;외부포트&gt;</code></li>
-        <li><b>이 패널:</b> <code>ssh -p 24160 -L 8080:127.0.0.1:3000 ubuntu@ssh.gsmsv.site</code></li>
+        <li><b>PC(Java):</b> <code id="addrJava">&lt;서버주소&gt;:&lt;외부포트&gt;</code></li>
+        <li><b>모바일/Bedrock:</b> 주소 <code id="addrHost">&lt;서버주소&gt;</code> · 포트 <code id="addrBedrock">&lt;외부포트&gt;</code></li>
+        <li><b>이 패널:</b> <code id="addrPanel">ssh -L 8080:127.0.0.1:3000 ubuntu@&lt;서버주소&gt;</code></li>
       </ul>
     </section>
     <section class="info" id="metricsSec">
@@ -160,8 +160,13 @@ async function refreshDashboard() {
   const curS = data.servers.find(s => s.id === state.server);
   if (curS) {
     const extPort = curS.extPort || '<외부포트>';
-    $('#addrJava').textContent = `ssh.gsmsv.site:${extPort}`;
+    const host = (data.panel && data.panel.sshHost) || '<서버주소>';
+    const sshPort = (data.panel && data.panel.sshPort) || '22';
+    $('#addrJava').textContent = `${host}:${extPort}`;
+    const hostEl = $('#addrHost'); if (hostEl) hostEl.textContent = host;
     $('#addrBedrock').textContent = String(extPort);
+    const panelEl = $('#addrPanel');
+    if (panelEl) panelEl.textContent = `ssh -p ${sshPort} -L 8080:127.0.0.1:3000 ubuntu@${host}`;
   }
   loadMetrics();
 }
@@ -1110,7 +1115,7 @@ async function viewAccess() {
     </ul>
     <div class="cards" style="margin-top:16px">
       <div class="card"><div class="card-title">🔑 권한 공유</div><p class="muted">친구에게 뷰어 비밀번호 + SSH 터널 명령을 알려주면 읽기 전용으로 접속합니다.</p></div>
-      <div class="card"><div class="card-title">🔌 서버 접속</div><p class="muted">대시보드의 접속 정보 참고. 외부 포트는 GSMSV에서 확인.</p></div>
+      <div class="card"><div class="card-title">🔌 서버 접속</div><p class="muted">대시보드의 접속 정보 참고. 외부 포트는 서버에서 확인.</p></div>
       <div class="card"><div class="card-title">🚫 차단 해제</div><p class="muted">플레이어 탭 또는 콘솔 <code>pardon 닉네임</code>.</p></div>
     </div>
     <p class="muted" style="margin-top:14px">뷰어 비밀번호 설정: GitHub에서 <code>gh secret set PANEL_VIEWER_PASSWORD</code> 후 재배포, 또는 서버 <code>~/MITS/.env</code>에 추가 후 <code>sudo systemctl restart mits</code>.</p>

@@ -1,4 +1,4 @@
-name: Deploy MITS to GSMSV
+name: Deploy MITS
 
 on:
   push:
@@ -9,7 +9,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     concurrency:
-      group: deploy-gsmsv
+      group: deploy-mits
       cancel-in-progress: false
     steps:
       - name: Deploy over SSH (provision Node + systemd)
@@ -20,9 +20,9 @@ jobs:
           PANEL_VIEWER_PASSWORD: ${{ secrets.PANEL_VIEWER_PASSWORD }}
           AUTO_BACKUP_HOURS: ${{ vars.AUTO_BACKUP_HOURS }}
         with:
-          host: ssh.gsmsv.site
-          port: 24160
-          username: ubuntu
+          host: ${{ secrets.SERVER_HOST }}
+          port: ${{ secrets.SERVER_PORT }}
+          username: ${{ secrets.SERVER_USER || 'ubuntu' }}
           password: ${{ secrets.SERVER_PASSWORD }}
           envs: PANEL_PASSWORD,SESSION_SECRET,PANEL_VIEWER_PASSWORD,AUTO_BACKUP_HOURS
           command_timeout: 20m

@@ -1,7 +1,7 @@
 {
   "name": "mits",
   "version": "1.0.0",
-  "description": "MITS — GSMSV PaperMC 서버(2대) 웹 관리 패널",
+  "description": "MITS — PaperMC 서버(2대) 웹 관리 패널",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {

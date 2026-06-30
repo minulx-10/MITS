@@ -9,7 +9,7 @@ function inHome(name) {
   return path.join(HOME, name);
 }
 
-// 서버 정의 — 기본값은 GSMSV 실측 구성(server1/server2, mc1/mc2, 25565/25566).
+// 서버 정의 — 기본값(server1/server2, mc1/mc2, 25565/25566).
 // 필요 시 .env로 오버라이드한다.
 const servers = [
   {
@@ -42,8 +42,8 @@ const config = {
   viewerPassword: process.env.PANEL_VIEWER_PASSWORD || '',
   sessionSecret: process.env.SESSION_SECRET || 'mits-dev-secret-change-me',
 
-  sshHost: process.env.SSH_HOST || 'ssh.gsmsv.site',
-  sshPort: process.env.SSH_PORT || '24160',
+  sshHost: process.env.SSH_HOST || 'your-server.example.com',
+  sshPort: process.env.SSH_PORT || '22',
 
   consoleLines: parseInt(process.env.CONSOLE_LINES || '250', 10),
   startScript: process.env.START_SCRIPT || inHome('start.sh'),

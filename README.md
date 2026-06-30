@@ -1,11 +1,11 @@
-# ⛏ MITS — Minecraft 서버 관리 패널 (GSMSV)
+# ⛏ MITS — Minecraft 서버 관리 패널
 
-GSMSV(Ubuntu VPS)에서 **tmux로 24시간 돌아가는 PaperMC 서버 2대**(`server1`/`server2`)를
+Ubuntu VPS에서 **tmux로 24시간 돌아가는 PaperMC 서버 2대**(`server1`/`server2`)를
 브라우저에서 관리하는 가벼운 웹 패널입니다. `main` 브랜치에 push하면 **GitHub Actions가
-GSMSV에 자동 배포**합니다.
+서버에 자동 배포**합니다.
 
-> 이 프로젝트는 Aternos → GSMSV 서버 이관 가이드(PDF)의 마지막 단계 — "웹 관리 패널을
-> 만들어 CI/CD로 자동 배포" — 를 실제로 구현한 것입니다.
+> 이 프로젝트는 Aternos에서 직접 호스팅하는 VPS로 마인크래프트 서버를 이관하는 과정의
+> 마지막 단계 — "웹 관리 패널을 만들어 CI/CD로 자동 배포" — 를 실제로 구현한 것입니다.
 
 ---
 
@@ -37,7 +37,7 @@ GSMSV에 자동 배포**합니다.
 
 ## 🏗 동작 방식
 
-패널(Node/Express)은 GSMSV에서 **`ubuntu` 사용자**로 `systemd` 서비스(`mits`)로 떠서,
+패널(Node/Express)은 서버에서 **`ubuntu` 사용자**로 `systemd` 서비스(`mits`)로 떠서,
 이미 가동 중인 `mc1`/`mc2` **tmux 세션과 같은 소켓**(`/tmp/tmux-<uid>/default`)을 공유합니다.
 그래서 별도 연동 없이 다음 명령으로 서버를 제어합니다.
 
@@ -58,10 +58,10 @@ GSMSV에 자동 배포**합니다.
 
 ---
 
-## 🚀 배포 (GitHub Actions → GSMSV)
+## 🚀 배포 (GitHub Actions → 서버)
 
 `main` push 또는 수동 실행(`workflow_dispatch`) 시 [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)이
-`appleboy/ssh-action`으로 GSMSV에 접속해 다음을 **멱등적으로** 수행합니다.
+`appleboy/ssh-action`으로 서버에 접속해 다음을 **멱등적으로** 수행합니다.
 
 1. `git`/`curl`/`node`(없으면 NodeSource로 Node 22) 설치
 2. `~/MITS` clone 또는 `git reset --hard origin/main`
@@ -73,11 +73,17 @@ GSMSV에 자동 배포**합니다.
 
 | 시크릿 | 설명 |
 |---|---|
-| `SERVER_PASSWORD` | GSMSV SSH 비밀번호 (`ubuntu@ssh.gsmsv.site:24160`) |
+| `SERVER_HOST` | 배포할 서버 호스트 (예: `your-server.example.com`) |
+| `SERVER_PORT` | SSH 포트 (예: `22`) |
+| `SERVER_USER` | SSH 사용자 (미설정 시 `ubuntu`) |
+| `SERVER_PASSWORD` | 서버 SSH 비밀번호 |
 | `PANEL_PASSWORD` | 패널 로그인 비밀번호 |
 | `SESSION_SECRET` | 세션 서명 시크릿 (랜덤 hex) |
 
 ```bash
+gh secret set SERVER_HOST     --repo minulx-10/MITS
+gh secret set SERVER_PORT     --repo minulx-10/MITS
+gh secret set SERVER_USER     --repo minulx-10/MITS   # 선택 (기본 ubuntu)
 gh secret set SERVER_PASSWORD --repo minulx-10/MITS
 gh secret set PANEL_PASSWORD  --repo minulx-10/MITS
 gh secret set SESSION_SECRET  --repo minulx-10/MITS
@@ -92,12 +98,12 @@ gh secret set SESSION_SECRET  --repo minulx-10/MITS
 패널은 보안을 위해 `127.0.0.1:3000`에만 바인딩됩니다. 로컬 PC에서 터널을 연 뒤 접속하세요.
 
 ```bash
-ssh -p 24160 -L 8080:127.0.0.1:3000 ubuntu@ssh.gsmsv.site
+ssh -p <PORT> -L 8080:127.0.0.1:3000 ubuntu@<SERVER_HOST>
 # 이후 브라우저에서:  http://localhost:8080
 ```
 
 **SSH 키로 무인증 접속**(권장): 공개키를 서버 `~/.ssh/authorized_keys`에 등록하고
-`~/.ssh/config`에 `Host gsmsv` 별칭을 두면 `ssh -N -L 8080:127.0.0.1:3000 gsmsv`로 비밀번호 없이 연결됩니다.
+`~/.ssh/config`에 `Host myserver` 별칭을 두면 `ssh -N -L 8080:127.0.0.1:3000 myserver`로 비밀번호 없이 연결됩니다.
 
 ---
 
@@ -110,7 +116,7 @@ npm start                 # http://127.0.0.1:3000
 ```
 
 > tmux가 없는 환경(예: Windows)에서도 패널은 뜨며, 서버 상태는 "정지됨"으로 표시됩니다.
-> 실제 제어/콘솔은 GSMSV(tmux 존재)에서 동작합니다.
+> 실제 제어/콘솔은 서버(tmux 존재)에서 동작합니다.
 
 ---
 
